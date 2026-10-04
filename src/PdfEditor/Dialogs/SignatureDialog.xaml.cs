@@ -25,8 +25,8 @@ public partial class SignatureDialog : Window
         var entries = new List<Entry>();
         foreach (var path in SignatureLibrary.List())
         {
-            try { entries.Add(new Entry(path, ImageUtil.FromBytes(File.ReadAllBytes(path)))); }
-            catch { /* skip unreadable files */ }
+            try { entries.Add(new Entry(path, ImageUtil.FromBytes(SignatureLibrary.Load(path)))); }
+            catch { /* skip files this user can't decrypt or that are damaged */ }
         }
         List.ItemsSource = entries;
         EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -84,7 +84,7 @@ public partial class SignatureDialog : Window
     private void Use_Click(object sender, RoutedEventArgs e)
     {
         if (List.SelectedItem is not Entry entry) return;
-        SelectedPng = File.ReadAllBytes(entry.Path);
+        SelectedPng = SignatureLibrary.Load(entry.Path);
         DialogResult = true;
     }
 
