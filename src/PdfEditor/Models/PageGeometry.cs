@@ -37,6 +37,9 @@ public sealed class PageGeometry
 
     public int Rotation { get; }
 
+    /// <summary>The page asks for column-wise tab order (/Tabs /C) instead of the default row-wise order.</summary>
+    public bool ColumnTabOrder { get; init; }
+
     /// <summary>Height of the media box; PDFsharp's XGraphics flips y around this value.</summary>
     public double MediaHeight { get; }
 

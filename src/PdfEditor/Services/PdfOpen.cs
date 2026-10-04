@@ -31,7 +31,10 @@ public static class PdfOpen
                 if (!c.IsEmpty && c.Width > 1 && c.Height > 1) crop = c;
             }
             int rotation = page.Elements.GetInteger("/Rotate");
-            list.Add(new PageGeometry(i, crop, rotation, page.Height.Point));
+            list.Add(new PageGeometry(i, crop, rotation, page.Height.Point)
+            {
+                ColumnTabOrder = page.Elements.GetName("/Tabs") == "/C",
+            });
         }
         return list;
     }

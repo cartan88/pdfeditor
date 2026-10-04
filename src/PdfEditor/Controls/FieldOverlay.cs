@@ -20,10 +20,9 @@ public static class FieldOverlay
     public static void Build(PageView page, IEnumerable<WidgetModel> widgets, Action<WidgetModel, Rect> onSignatureField)
     {
         page.FieldLayer.Children.Clear();
-        foreach (var w in widgets)
+        // Controls are added in reading order: WPF tabs through equal-TabIndex controls in the order they were added.
+        foreach (var (w, r) in TabOrder(widgets.Where(w => !w.Hidden), page.Geometry))
         {
-            if (w.Hidden) continue;
-            var r = page.Geometry.PdfRectToView(w.PdfRect);
             if (r.Width < 2 || r.Height < 2) continue;
             FrameworkElement? el = w.Field.Kind switch
             {
@@ -41,6 +40,38 @@ public static class FieldOverlay
             Canvas.SetTop(el, r.Y);
             page.FieldLayer.Children.Add(el);
         }
+    }
+
+    /// <summary>
+    /// Sorts widgets into the order the user reads the page (after rotation): rows top to bottom and
+    /// left to right within a row, or columns left to right and top to bottom when the page asks for it.
+    /// A widget joins the current row when its top edge is above the middle of both it and the row's first widget,
+    /// so fields that are only roughly aligned (a radio beside a text box) still share a row.
+    /// </summary>
+    public static List<(WidgetModel Widget, Rect ViewRect)> TabOrder(IEnumerable<WidgetModel> widgets, PageGeometry geometry)
+    {
+        bool columns = geometry.ColumnTabOrder;
+        // Work in "primary/secondary" coordinates so one algorithm handles rows and columns.
+        double Start(Rect r) => columns ? r.Left : r.Top;
+        double Size(Rect r) => columns ? r.Width : r.Height;
+        double Cross(Rect r) => columns ? r.Top : r.Left;
+
+        var items = widgets.Select(w => (Widget: w, ViewRect: geometry.PdfRectToView(w.PdfRect)))
+            .OrderBy(x => Start(x.ViewRect)).ThenBy(x => Cross(x.ViewRect)).ToList();
+
+        var result = new List<(WidgetModel, Rect)>(items.Count);
+        int i = 0;
+        while (i < items.Count)
+        {
+            var first = items[i].ViewRect;
+            int end = i + 1;
+            while (end < items.Count
+                   && Start(items[end].ViewRect) < Start(first) + Math.Min(Size(first), Size(items[end].ViewRect)) / 2)
+                end++;
+            result.AddRange(items.Skip(i).Take(end - i).OrderBy(x => Cross(x.ViewRect)));
+            i = end;
+        }
+        return result;
     }
 
     /// <summary>
