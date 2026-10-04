@@ -30,6 +30,12 @@ public partial class MainWindow : Window
     private record StampState(StampKind Kind, int Page, double Cx, double Cy, double W, double H, double Angle,
         string Text, double FontSize, Color Color, string Font, byte[]? Data);
 
+    /// <summary>Everything undo covers: placed items, and form field values in <see cref="_fields"/> order.</summary>
+    private sealed record EditorState(List<StampState> Stamps, string[] Fields)
+    {
+        public bool SameAs(EditorState other) => Stamps.SequenceEqual(other.Stamps) && Fields.SequenceEqual(other.Fields);
+    }
+
     // Document state
     private string? _path;
     private byte[]? _bytes;
@@ -57,9 +63,15 @@ public partial class MainWindow : Window
     private StampView? _selected;
     private double _textFontSize = 12;
     private Color _textColor = Colors.Black;
-    private readonly Stack<List<StampState>> _undo = new();
-    private readonly Stack<List<StampState>> _redo = new();
-    private List<StampState>? _gestureSnapshot;
+    private readonly Stack<EditorState> _undo = new();
+    private readonly Stack<EditorState> _redo = new();
+    private EditorState? _gestureSnapshot;
+    // Form field undo: last value seen per field (to rebuild the "before" state), the text field currently
+    // being typed into (its keystrokes merge into one step), and a guard while undo/redo writes values back.
+    private Dictionary<FormFieldModel, int> _fieldIndex = new(ReferenceEqualityComparer.Instance);
+    private string[] _fieldValues = Array.Empty<string>();
+    private FormFieldModel? _typingField;
+    private bool _restoring;
     private bool _updatingSelectionBar;
 
     // White-out drag
@@ -87,6 +99,8 @@ public partial class MainWindow : Window
             ColorBox.Items.Add(item);
         }
         SizeChanged += (s, e) => { if (_fitWidth) FitWidth(); };
+        // Leaving a form field ends its typing session, so the next edit starts a new undo step.
+        PagesPanel.AddHandler(Keyboard.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((s, e) => _typingField = null), true);
         UpdateUi();
         UpdateSelectionBar();
     }
@@ -146,7 +160,10 @@ public partial class MainWindow : Window
             _password = password;
             _renderer = renderer;
             _fields = fields;
-            foreach (var f in _fields) f.PropertyChanged += (s, e) => MarkDirty();
+            _fieldIndex = new Dictionary<FormFieldModel, int>(ReferenceEqualityComparer.Instance);
+            for (int i = 0; i < _fields.Count; i++) _fieldIndex[_fields[i]] = i;
+            _fieldValues = _fields.Select(f => f.Value).ToArray();
+            foreach (var f in _fields) f.PropertyChanged += (s, e) => OnFieldChanged((FormFieldModel)s!);
 
             foreach (var g in geometry)
             {
@@ -195,6 +212,10 @@ public partial class MainWindow : Window
         _fields = new();
         _undo.Clear();
         _redo.Clear();
+        _gestureSnapshot = null;
+        _typingField = null;
+        _fieldIndex = new(ReferenceEqualityComparer.Instance);
+        _fieldValues = Array.Empty<string>();
         _path = null;
         _bytes = null;
         _dirty = false;
@@ -656,46 +677,84 @@ public partial class MainWindow : Window
         foreach (var s in _stamps.ToList()) s.CommitEdit();
     }
 
-    private List<StampState> Snapshot() => _stamps.Select(v => v.Model).Select(m =>
+    private List<StampState> StampSnapshot() => _stamps.Select(v => v.Model).Select(m =>
         new StampState(m.Kind, m.PageIndex, m.CenterX, m.CenterY, m.Width, m.Height, m.Angle, m.Text, m.FontSize, m.Color, m.FontFamily, m.ImageData)).ToList();
 
-    private void PushUndo(List<StampState> before)
+    private EditorState Snapshot() => new(StampSnapshot(), _fields.Select(f => f.Value).ToArray());
+
+    private void PushUndo(EditorState before)
     {
         _undo.Push(before);
         _redo.Clear();
+        _typingField = null;
         UpdateUi();
     }
 
-    /// <summary>Records an undo step if the stamps changed since the gesture began.</summary>
+    /// <summary>Records an undo step if anything changed since the gesture began.</summary>
     private void CommitGesture()
     {
         var before = _gestureSnapshot;
         _gestureSnapshot = null;
-        if (before != null && !before.SequenceEqual(Snapshot())) PushUndo(before);
+        if (before != null && !before.SameAs(Snapshot())) PushUndo(before);
     }
 
     private void Mutate(Action action)
     {
         var before = Snapshot();
         action();
-        if (!before.SequenceEqual(Snapshot())) PushUndo(before);
+        if (!before.SameAs(Snapshot())) PushUndo(before);
     }
 
-    private void Restore(List<StampState> states)
+    /// <summary>
+    /// Records an undo step for a form field edit. The field has already changed, so the "before" state is rebuilt
+    /// from the last value seen. Typing into the same text field (or editable drop-down) extends the current step
+    /// until focus leaves it; every check box / radio click is a step of its own.
+    /// </summary>
+    private void OnFieldChanged(FormFieldModel field)
     {
-        Select(null);
-        foreach (var v in _stamps.ToList())
-            (v.Parent as Panel)?.Children.Remove(v);
-        _stamps.Clear();
-        foreach (var s in states)
+        MarkDirty();
+        int i = _fieldIndex[field];
+        if (!_restoring && !ReferenceEquals(field, _typingField))
         {
-            var m = new StampModel
+            var before = Snapshot();
+            before.Fields[i] = _fieldValues[i];
+            PushUndo(before);
+            bool typed = field.Kind == FieldKind.Text || (field.Kind == FieldKind.Choice && (field.Editable || field.Options.Count == 0));
+            if (typed) _typingField = field;
+        }
+        _fieldValues[i] = field.Value;
+    }
+
+    private void Restore(EditorState state)
+    {
+        _typingField = null;
+        _restoring = true;
+        try
+        {
+            for (int i = 0; i < _fields.Count; i++) _fields[i].Value = state.Fields[i];
+        }
+        finally
+        {
+            _restoring = false;
+        }
+
+        // Rebuild placed items only if they differ, so undoing a field edit keeps the current selection.
+        if (!state.Stamps.SequenceEqual(StampSnapshot()))
+        {
+            Select(null);
+            foreach (var v in _stamps.ToList())
+                (v.Parent as Panel)?.Children.Remove(v);
+            _stamps.Clear();
+            foreach (var s in state.Stamps)
             {
-                Kind = s.Kind, PageIndex = s.Page, ImageData = s.Data,
-                Text = s.Text, FontSize = s.FontSize, Color = s.Color, FontFamily = s.Font,
-            };
-            m.Width = s.W; m.Height = s.H; m.CenterX = s.Cx; m.CenterY = s.Cy; m.Angle = s.Angle;
-            AddStamp(m, select: false);
+                var m = new StampModel
+                {
+                    Kind = s.Kind, PageIndex = s.Page, ImageData = s.Data,
+                    Text = s.Text, FontSize = s.FontSize, Color = s.Color, FontFamily = s.Font,
+                };
+                m.Width = s.W; m.Height = s.H; m.CenterX = s.Cx; m.CenterY = s.Cy; m.Angle = s.Angle;
+                AddStamp(m, select: false);
+            }
         }
         MarkDirty();
         UpdateUi();
@@ -1045,7 +1104,8 @@ public partial class MainWindow : Window
             "  • Double-click placed text to edit it. Del deletes, arrows nudge (Shift = 10×).\n" +
             "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
-            "  • Ctrl+Z / Ctrl+Y undo/redo placed items. Ctrl+mouse wheel zooms.\n" +
+            "  • Ctrl+Z / Ctrl+Y undo/redo form entries and placed items (inside a field, Ctrl+Z undoes typing there).\n" +
+            "  • Ctrl+mouse wheel zooms.\n" +
             "  • File › Save Flattened Copy makes form entries permanent (no longer editable).\n" +
             "  • Ctrl+P prints the document with everything you filled in, exactly as a flattened copy would look.",
             "How to use PDF Editor", MessageBoxButton.OK, MessageBoxImage.Information);

@@ -37,14 +37,16 @@ public sealed class FormFieldModel : INotifyPropertyChanged
         {
             if (_value == value) return;
             _value = value;
-            IsDirty = true;
             OnPropertyChanged();
         }
     }
 
-    public bool IsDirty { get; private set; }
+    private string _initialValue = "";
 
-    public void SetInitialValue(string value) { _value = value; IsDirty = false; }
+    /// <summary>The value differs from the one in the file (undoing back to it makes the field clean again).</summary>
+    public bool IsDirty => _value != _initialValue;
+
+    public void SetInitialValue(string value) { _value = _initialValue = value; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
