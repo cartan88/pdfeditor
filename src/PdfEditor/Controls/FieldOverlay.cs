@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -16,9 +17,19 @@ public static class FieldOverlay
 
     public static bool Highlight { get; set; } = true;
 
+    /// <summary>
+    /// Unsubscribe actions for the model events each page's controls listen to. The field models outlive the
+    /// controls (overlays are rebuilt when highlighting is toggled), so without this every rebuild would leave the
+    /// old controls alive and still reacting to edits.
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PageView, List<Action>> Subscriptions = new();
+
     /// <param name="onSignatureField">Called when a signature field is clicked, with its rectangle in view space.</param>
     public static void Build(PageView page, IEnumerable<WidgetModel> widgets, Action<WidgetModel, Rect> onSignatureField)
     {
+        var subscriptions = Subscriptions.GetOrCreateValue(page);
+        foreach (var unsubscribe in subscriptions) unsubscribe();
+        subscriptions.Clear();
         page.FieldLayer.Children.Clear();
         // Controls are added in reading order: WPF tabs through equal-TabIndex controls in the order they were added.
         foreach (var (w, r) in TabOrder(widgets.Where(w => !w.Hidden), page.Geometry))
@@ -27,8 +38,8 @@ public static class FieldOverlay
             FrameworkElement? el = w.Field.Kind switch
             {
                 FieldKind.Text => CreateText(w, r),
-                FieldKind.CheckBox or FieldKind.Radio => CreateToggle(w, r),
-                FieldKind.Choice => CreateChoice(w, r),
+                FieldKind.CheckBox or FieldKind.Radio => CreateToggle(w, r, subscriptions),
+                FieldKind.Choice => CreateChoice(w, r, subscriptions),
                 FieldKind.Signature => CreateSignature(w, r, onSignatureField),
                 _ => null,
             };
@@ -117,7 +128,15 @@ public static class FieldOverlay
         return tb;
     }
 
-    private static FrameworkElement CreateToggle(WidgetModel w, Rect r)
+    /// <summary>Subscribes to a field's changes and records how to undo it when the page is rebuilt.</summary>
+    private static void Listen(FormFieldModel field, List<Action> subscriptions, Action onChanged)
+    {
+        PropertyChangedEventHandler handler = (s, e) => onChanged();
+        field.PropertyChanged += handler;
+        subscriptions.Add(() => field.PropertyChanged -= handler);
+    }
+
+    private static FrameworkElement CreateToggle(WidgetModel w, Rect r, List<Action> subscriptions)
     {
         var f = w.Field;
         bool radio = f.Kind == FieldKind.Radio;
@@ -137,7 +156,7 @@ public static class FieldOverlay
         };
         void Update() => glyph.Visibility = f.Value == w.OnState ? Visibility.Visible : Visibility.Hidden;
         Update();
-        f.PropertyChanged += (s, e) => Update();
+        Listen(f, subscriptions, Update);
 
         void Toggle()
         {
@@ -150,7 +169,7 @@ public static class FieldOverlay
         return border;
     }
 
-    private static FrameworkElement CreateChoice(WidgetModel w, Rect r)
+    private static FrameworkElement CreateChoice(WidgetModel w, Rect r, List<Action> subscriptions)
     {
         var f = w.Field;
         var cb = new ComboBox
@@ -174,7 +193,7 @@ public static class FieldOverlay
             syncing = false;
         }
         Sync();
-        f.PropertyChanged += (s, e) => { if (!syncing) Sync(); };
+        Listen(f, subscriptions, () => { if (!syncing) Sync(); });
         cb.SelectionChanged += (s, e) =>
         {
             if (syncing || cb.SelectedIndex < 0) return;
