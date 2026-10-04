@@ -5,6 +5,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using PdfEditor.Models;
+using PdfEditor.Services;
 
 namespace PdfEditor.Controls;
 
@@ -31,13 +32,15 @@ public static class FieldOverlay
         foreach (var unsubscribe in subscriptions) unsubscribe();
         subscriptions.Clear();
         page.FieldLayer.Children.Clear();
+        // Text in the saved file isn't kerned; without this, pairs such as "Ta" sit closer on screen (inherited by all controls).
+        System.Windows.Documents.Typography.SetKerning(page.FieldLayer, false);
         // Controls are added in reading order: WPF tabs through equal-TabIndex controls in the order they were added.
         foreach (var (w, r) in TabOrder(widgets.Where(w => !w.Hidden), page.Geometry))
         {
             if (r.Width < 2 || r.Height < 2) continue;
             FrameworkElement? el = w.Field.Kind switch
             {
-                FieldKind.Text => CreateText(w, r),
+                FieldKind.Text => CreateText(w, r, subscriptions),
                 FieldKind.CheckBox or FieldKind.Radio => CreateToggle(w, r, subscriptions),
                 FieldKind.Choice => CreateChoice(w, r, subscriptions),
                 FieldKind.Signature => CreateSignature(w, r, onSignatureField),
@@ -92,17 +95,28 @@ public static class FieldOverlay
     private static Brush BackgroundFor(bool initiallyEmpty) =>
         initiallyEmpty ? (Highlight ? FieldTint : Brushes.Transparent) : (Highlight ? FieldOpaque : Brushes.White);
 
-    private static FrameworkElement CreateText(WidgetModel w, Rect r)
+    /// <summary>
+    /// WPF's TextBox and PasswordBox templates keep their text this far inside the left and right edges.
+    /// Subtracting it from the padding puts the text exactly <see cref="FieldText.Padding"/> from the edge, as in the saved file.
+    /// </summary>
+    private const double TextBoxInset = 2;
+
+    private static Thickness TextPadding(bool multiline) =>
+        new(FieldText.Padding - TextBoxInset, multiline ? FieldText.Padding : 0, FieldText.Padding - TextBoxInset, 0);
+
+    private static FrameworkElement CreateText(WidgetModel w, Rect r, List<Action> subscriptions)
     {
         var f = w.Field;
-        double fs = f.FontSize > 0 ? f.FontSize : f.Multiline ? 10 : Math.Clamp(r.Height * 0.65, 6, 12);
+        if (f.Comb && f.MaxLength > 0 && !f.Multiline) return CreateComb(w, r);
+        if (f.Password && !f.Multiline) return CreatePassword(w, r, subscriptions);
+
+        // Font, size, colour and padding follow FieldText, the same rules PdfSaver uses for the saved appearance.
         var tb = new TextBox
         {
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(1, 0, 1, 0),
+            Padding = TextPadding(f.Multiline),
             Background = BackgroundFor(string.IsNullOrEmpty(f.Value)),
-            FontFamily = new FontFamily("Arial"),
-            FontSize = fs,
+            Foreground = Frozen(f.TextColor),
             VerticalContentAlignment = f.Multiline ? VerticalAlignment.Top : VerticalAlignment.Center,
             AcceptsReturn = f.Multiline,
             TextWrapping = f.Multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
@@ -112,20 +126,135 @@ public static class FieldOverlay
             CaretBrush = Brushes.Black,
         };
         if (f.MaxLength > 0) tb.MaxLength = f.MaxLength;
-        if (f.Comb && f.MaxLength > 0)
-        {
-            // Spread characters roughly across the comb cells.
-            tb.FontFamily = new FontFamily("Consolas");
-            tb.TextAlignment = TextAlignment.Left;
-        }
         tb.SetBinding(TextBox.TextProperty, new Binding(nameof(FormFieldModel.Value))
         {
             Source = f,
             Mode = BindingMode.TwoWay,
             UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
         });
+        // Auto-sized fields shrink as the text grows, exactly as they will in the saved file.
+        void Fit()
+        {
+            string family = FieldText.Family(f, tb.Text);
+            if (tb.FontFamily.Source != family) tb.FontFamily = new FontFamily(family);
+            tb.FontSize = f.Multiline ? FieldText.MultilineSize(f) : FieldText.SingleLineSize(f, tb.Text, r.Width, r.Height);
+        }
+        Fit();
+        tb.TextChanged += (s, e) => Fit();
         AddFocusRing(tb);
         return tb;
+    }
+
+    /// <summary>Password fields show asterisks, as the saved appearance does.</summary>
+    private static FrameworkElement CreatePassword(WidgetModel w, Rect r, List<Action> subscriptions)
+    {
+        var f = w.Field;
+        var pb = new PasswordBox
+        {
+            PasswordChar = '*',
+            BorderThickness = new Thickness(0),
+            Padding = TextPadding(false),
+            Background = BackgroundFor(string.IsNullOrEmpty(f.Value)),
+            Foreground = Frozen(f.TextColor),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            IsEnabled = !f.ReadOnly,
+            Password = f.Value,
+        };
+        if (f.MaxLength > 0) pb.MaxLength = f.MaxLength;
+        void Fit()
+        {
+            string shown = FieldText.Display(f, pb.Password);
+            pb.FontFamily = new FontFamily(FieldText.Family(f, shown));
+            pb.FontSize = FieldText.SingleLineSize(f, shown, r.Width, r.Height);
+        }
+        Fit();
+        bool syncing = false;
+        pb.PasswordChanged += (s, e) =>
+        {
+            Fit();
+            if (syncing) return;
+            syncing = true;
+            f.Value = pb.Password;
+            syncing = false;
+        };
+        Listen(f, subscriptions, () =>
+        {
+            if (syncing || pb.Password == f.Value) return;
+            syncing = true;
+            pb.Password = f.Value; // undo / redo
+            syncing = false;
+            Fit();
+        });
+        AddFocusRing(pb);
+        return pb;
+    }
+
+    /// <summary>
+    /// Comb fields: one character centred in each cell, as in the saved file. A TextBox with invisible text takes
+    /// the typing; <see cref="CombCells"/> draws the characters and highlights the cell being typed into.
+    /// </summary>
+    private static FrameworkElement CreateComb(WidgetModel w, Rect r)
+    {
+        var f = w.Field;
+        var tb = new TextBox
+        {
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            Foreground = Brushes.Transparent,
+            CaretBrush = Brushes.Transparent,
+            SelectionOpacity = 0,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            IsReadOnly = f.ReadOnly,
+            MaxLength = f.MaxLength,
+            FontSize = FieldText.CombSize(f, r.Height),
+        };
+        tb.SetBinding(TextBox.TextProperty, new Binding(nameof(FormFieldModel.Value))
+        {
+            Source = f,
+            Mode = BindingMode.TwoWay,
+            UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+        });
+        var cells = new CombCells(f, tb, r.Width, r.Height) { IsHitTestVisible = false };
+        tb.TextChanged += (s, e) => cells.InvalidateVisual();
+        tb.SelectionChanged += (s, e) => cells.InvalidateVisual();
+        tb.GotKeyboardFocus += (s, e) => cells.InvalidateVisual();
+        tb.LostKeyboardFocus += (s, e) => cells.InvalidateVisual();
+        AddFocusRing(tb);
+        var grid = new Grid { Background = BackgroundFor(string.IsNullOrEmpty(f.Value)), ToolTip = f.FullName };
+        grid.Children.Add(cells);
+        grid.Children.Add(tb);
+        return grid;
+    }
+
+    /// <summary>Draws a comb field's characters (one per cell, centred on the shared baseline) and the active cell.</summary>
+    private sealed class CombCells(FormFieldModel field, TextBox input, double width, double height) : FrameworkElement
+    {
+        private static readonly Brush ActiveCell = Frozen(Color.FromArgb(0x40, 0x25, 0x63, 0xEB));
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            string text = input.Text;
+            double cell = width / field.MaxLength, size = FieldText.CombSize(field, height);
+            string family = FieldText.Family(field, text);
+            var typeface = new Typeface(family);
+            var brush = Frozen(field.TextColor);
+            double baseline = FieldText.CenteredBaseline(family, size, height);
+            double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+
+            if (input.IsKeyboardFocused)
+            {
+                int active = Math.Min(input.CaretIndex, field.MaxLength - 1);
+                dc.DrawRectangle(ActiveCell, null, new Rect(active * cell, 0, cell, height));
+            }
+            for (int i = 0; i < Math.Min(text.Length, field.MaxLength); i++)
+            {
+                var ft = new FormattedText(text[i].ToString(), System.Globalization.CultureInfo.CurrentUICulture,
+                    FlowDirection.LeftToRight, typeface, size, brush, pixelsPerDip);
+                double x = i * cell + (cell - FieldText.Width(text[i].ToString(), family, size)) / 2;
+                dc.DrawText(ft, new Point(x, baseline - ft.Baseline));
+            }
+        }
     }
 
     /// <summary>Subscribes to a field's changes and records how to undo it when the page is rebuilt.</summary>
@@ -169,6 +298,9 @@ public static class FieldOverlay
         return border;
     }
 
+    private static string ChoiceDisplay(FormFieldModel f) =>
+        f.Options.FirstOrDefault(o => o.Export == f.Value).Display ?? f.Value;
+
     private static FrameworkElement CreateChoice(WidgetModel w, Rect r, List<Action> subscriptions)
     {
         var f = w.Field;
@@ -176,7 +308,10 @@ public static class FieldOverlay
         {
             IsEditable = f.Editable || f.Options.Count == 0,
             IsEnabled = !f.ReadOnly,
-            FontSize = f.FontSize > 0 ? f.FontSize : Math.Clamp(r.Height * 0.6, 6, 12),
+            // Same font, size and colour rules as the saved appearance (the drop-down arrow still takes some room).
+            FontFamily = new FontFamily(FieldText.Family(f, ChoiceDisplay(f))),
+            FontSize = FieldText.SingleLineSize(f, ChoiceDisplay(f), r.Width, r.Height),
+            Foreground = Frozen(f.TextColor),
             Padding = new Thickness(2, 0, 2, 0),
             VerticalContentAlignment = VerticalAlignment.Center,
             Background = BackgroundFor(string.IsNullOrEmpty(f.Value)),

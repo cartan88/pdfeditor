@@ -35,7 +35,7 @@ public static class FontPicker
         return true;
     }
 
-    private static GlyphTypeface? GetGlyphTypeface(string family)
+    internal static GlyphTypeface? GetGlyphTypeface(string family)
     {
         lock (Cache)
         {

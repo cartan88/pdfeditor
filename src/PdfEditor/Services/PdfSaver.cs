@@ -4,7 +4,6 @@ using System.Reflection;
 using System.Text;
 using PdfEditor.Models;
 using PdfSharp.Drawing;
-using PdfSharp.Drawing.Layout;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.Advanced;
 using static PdfEditor.Services.PdfObjects;
@@ -66,8 +65,11 @@ public static class PdfSaver
         }
         else if (bindings.Count > 0 && GetDict(doc.Internals.Catalog, "/AcroForm") is { } acro)
         {
-            // Ask viewers to refresh field appearances so they look native in every reader.
-            acro.Elements["/NeedAppearances"] = new PdfBoolean(true);
+            // Only ask viewers to regenerate appearances when a field has none. Otherwise readers such as Acrobat
+            // would redraw every field with their own layout instead of the one shown while editing.
+            bool missing = bindings.Any(b => b.Model.Kind is FieldKind.Text or FieldKind.Choice or FieldKind.CheckBox or FieldKind.Radio
+                                             && b.Widgets.Any(w => !w.Widget.Hidden) && NeedsAppearance(b));
+            acro.Elements["/NeedAppearances"] = new PdfBoolean(missing);
         }
 
         foreach (var group in stamps.GroupBy(s => s.PageIndex))
@@ -161,46 +163,8 @@ public static class PdfSaver
                 if (bw > 0) g.DrawRectangle(new XPen(bc, bw), bw / 2, bw / 2, w - bw, h - bw);
             }
 
-            if (model.Password) text = new string('*', text.Length);
-            if (text.Length > 0)
-            {
-                var (cr, cg, cb) = FormReader.ParseColor(b.DefaultAppearance);
-                var brush = new XSolidBrush(XColor.FromArgb(255, (int)(cr * 255), (int)(cg * 255), (int)(cb * 255)));
-                string family = FontPicker.PickFor(text);
-                var align = model.Alignment switch { 1 => XStringAlignment.Center, 2 => XStringAlignment.Far, _ => XStringAlignment.Near };
-                double pad = 2;
-
-                if (model.Comb && model.MaxLength > 0 && !model.Multiline)
-                {
-                    double fs = model.FontSize > 0 ? model.FontSize : Math.Clamp(h * 0.65, 4, 12);
-                    var font = MakeFont(family, fs);
-                    double cell = w / model.MaxLength;
-                    var fmt = new XStringFormat { Alignment = XStringAlignment.Center, LineAlignment = XLineAlignment.Center };
-                    for (int i = 0; i < Math.Min(text.Length, model.MaxLength); i++)
-                        g.DrawString(text[i].ToString(), font, brush, new XRect(i * cell, 0, cell, h), fmt);
-                }
-                else if (model.Multiline)
-                {
-                    double fs = model.FontSize > 0 ? model.FontSize : 10;
-                    var tf = new XTextFormatter(g)
-                    {
-                        Alignment = model.Alignment switch { 1 => XParagraphAlignment.Center, 2 => XParagraphAlignment.Right, _ => XParagraphAlignment.Left },
-                    };
-                    tf.DrawString(text.Replace("\r\n", "\n"), MakeFont(family, fs), brush,
-                        new XRect(pad, pad, Math.Max(1, w - 2 * pad), Math.Max(1, h - 2 * pad)), XStringFormats.TopLeft);
-                }
-                else
-                {
-                    double fs = model.FontSize;
-                    if (fs <= 0)
-                    {
-                        fs = Math.Clamp(h * 0.7, 4, 12);
-                        while (fs > 4 && g.MeasureString(text, MakeFont(family, fs)).Width > w - 2 * pad) fs -= 0.5;
-                    }
-                    var fmt = new XStringFormat { Alignment = align, LineAlignment = XLineAlignment.Center };
-                    g.DrawString(text, MakeFont(family, fs), brush, new XRect(pad, 0, Math.Max(1, w - 2 * pad), h), fmt);
-                }
-            }
+            text = FieldText.Display(model, text);
+            if (text.Length > 0) DrawFieldText(g, model, text, w, h);
         }
 
         form.DrawingFinished();
@@ -222,6 +186,54 @@ public static class PdfSaver
         var ap = new PdfDictionary(doc);
         ap.Elements["/N"] = pdfForm.Reference;
         widget.Elements["/AP"] = ap;
+    }
+
+    /// <summary>Draws a field's text with the same layout rules the on-screen controls use (see <see cref="FieldText"/>).</summary>
+    private static void DrawFieldText(XGraphics g, FormFieldModel model, string text, double w, double h)
+    {
+        var c = model.TextColor;
+        var brush = new XSolidBrush(XColor.FromArgb(255, c.R, c.G, c.B));
+        string family = FieldText.Family(model, text);
+        const double pad = FieldText.Padding;
+        var centred = new XStringFormat { Alignment = XStringAlignment.Center, LineAlignment = XLineAlignment.BaseLine };
+
+        if (model.Comb && model.MaxLength > 0 && !model.Multiline)
+        {
+            double fs = FieldText.CombSize(model, h);
+            var font = MakeFont(family, fs);
+            double cell = w / model.MaxLength, y = FieldText.CenteredBaseline(family, fs, h);
+            for (int i = 0; i < Math.Min(text.Length, model.MaxLength); i++)
+                g.DrawString(text[i].ToString(), font, brush, i * cell + cell / 2, y, centred);
+        }
+        else if (model.Multiline)
+        {
+            double fs = FieldText.MultilineSize(model);
+            var font = MakeFont(family, fs);
+            double inner = Math.Max(1, w - 2 * pad), lineHeight = FieldText.LineHeight(family, fs);
+            double y = pad + FieldText.Baseline(family, fs);
+            foreach (var line in FieldText.Wrap(text, family, fs, inner))
+            {
+                if (y - FieldText.Baseline(family, fs) > h) break;
+                DrawAligned(g, line.TrimEnd(), font, brush, model.Alignment, pad, inner, y, family, fs);
+                y += lineHeight;
+            }
+        }
+        else
+        {
+            double fs = FieldText.SingleLineSize(model, text, w, h);
+            DrawAligned(g, text, MakeFont(family, fs), brush, model.Alignment, pad, Math.Max(1, w - 2 * pad),
+                FieldText.CenteredBaseline(family, fs, h), family, fs);
+        }
+    }
+
+    /// <summary>Draws one line on a baseline, left / centred / right within [left, left + width] (quadding 0 / 1 / 2).</summary>
+    private static void DrawAligned(XGraphics g, string line, XFont font, XBrush brush, int quadding, double left, double width,
+        double baseline, string family, double size)
+    {
+        if (line.Length == 0) return;
+        double lineWidth = FieldText.Width(line, family, size);
+        double x = quadding switch { 1 => left + (width - lineWidth) / 2, 2 => left + width - lineWidth, _ => left };
+        g.DrawString(line, font, brush, x, baseline, new XStringFormat { LineAlignment = XLineAlignment.BaseLine });
     }
 
     private static XFont MakeFont(string family, double size) =>

@@ -120,6 +120,8 @@ public static class FormReader
             IsSigned = kind == FieldKind.Signature && GetInherited(node, "/V") is PdfDictionary,
             MaxLength = (int)(GetNumber(GetInherited(node, "/MaxLen")) ?? 0),
             FontSize = ParseFontSize(da),
+            FontFamily = FontFamilyFor(da, acroForm),
+            TextColor = ToColor(ParseColor(da)),
             Alignment = q,
             Options = options,
         };
@@ -180,6 +182,26 @@ public static class FormReader
         }
         return null;
     }
+
+    /// <summary>
+    /// Picks an installed font for the /DA font resource, from its /DR BaseFont when available
+    /// (otherwise the resource name, e.g. /Helv, /Cour, /TiRo). Anything unrecognised uses Arial.
+    /// </summary>
+    private static string FontFamilyFor(string da, PdfDictionary acroForm)
+    {
+        var m = Regex.Match(da, @"/([^\s/]+)\s+[\d.]+\s+Tf");
+        if (!m.Success) return "Arial";
+        string name = m.Groups[1].Value;
+        if (GetDict(acroForm, "/DR") is { } dr && GetDict(dr, "/Font") is { } fonts && GetDict(fonts, "/" + name) is { } font
+            && GetText(Get(font, "/BaseFont")) is { } baseFont)
+            name = baseFont;
+        if (name.Contains("Cour", StringComparison.OrdinalIgnoreCase)) return "Courier New";
+        if (name.StartsWith("Ti", StringComparison.OrdinalIgnoreCase) || name.Contains("Times", StringComparison.OrdinalIgnoreCase)) return "Times New Roman";
+        return "Arial";
+    }
+
+    private static System.Windows.Media.Color ToColor((double R, double G, double B) c) =>
+        System.Windows.Media.Color.FromRgb((byte)Math.Round(c.R * 255), (byte)Math.Round(c.G * 255), (byte)Math.Round(c.B * 255));
 
     public static double ParseFontSize(string da)
     {

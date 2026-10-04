@@ -23,6 +23,10 @@ public sealed class FormFieldModel : INotifyPropertyChanged
     public int MaxLength { get; init; }
     /// <summary>Font size from the field's /DA string; 0 means auto.</summary>
     public double FontSize { get; init; }
+    /// <summary>Installed font standing in for the field's /DA font (Helvetica → Arial, Courier, Times).</summary>
+    public string FontFamily { get; init; } = "Arial";
+    /// <summary>Text colour from the field's /DA string.</summary>
+    public System.Windows.Media.Color TextColor { get; init; } = System.Windows.Media.Colors.Black;
     /// <summary>Quadding: 0 left, 1 center, 2 right.</summary>
     public int Alignment { get; init; }
     /// <summary>Choice options as (export value, display text).</summary>
