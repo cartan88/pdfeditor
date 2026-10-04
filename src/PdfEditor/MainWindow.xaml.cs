@@ -37,7 +37,7 @@ public partial class MainWindow : Window
     private List<FormFieldModel> _fields = new();
     private readonly List<StampView> _stamps = new();
     private bool _dirty;
-    private bool _saving;
+    private bool _busy;
     private bool _signedWarningAccepted;
 
     // View state
@@ -213,7 +213,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveAsync(string path, bool flatten)
     {
-        if (_bytes == null || _saving) return false;
+        if (_bytes == null || _busy) return false;
         CommitTextEdits();
         if (!ConfirmBreakSignatures()) return false;
         var stamps = _stamps.Select(v => v.Model).ToList();
@@ -222,7 +222,7 @@ public partial class MainWindow : Window
         var password = _password;
         try
         {
-            _saving = true;
+            _busy = true;
             Mouse.OverrideCursor = Cursors.Wait;
             SetStatus("Saving…");
             await Task.Run(() => PdfSaver.Save(bytes, password, fields, stamps, flatten, path));
@@ -239,7 +239,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _saving = false;
+            _busy = false;
             Mouse.OverrideCursor = null;
         }
 
@@ -286,6 +286,69 @@ public partial class MainWindow : Window
         };
         if (sfd.ShowDialog(this) != true) return false;
         return await SaveAsync(sfd.FileName, flatten);
+    }
+
+    // =====================================================================================
+    // Printing
+    // =====================================================================================
+
+    private async Task PrintAsync()
+    {
+        if (_bytes == null || _busy) return;
+        CommitTextEdits();
+        int current = CurrentPage()?.Index ?? 0;
+        var dlg = new PrintDialog
+        {
+            UserPageRangeEnabled = true,
+            CurrentPageEnabled = true,
+            MinPage = 1,
+            MaxPage = (uint)_pages.Count,
+            PageRange = new PageRange(1, _pages.Count),
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        List<int> pages = dlg.PageRangeSelection switch
+        {
+            PageRangeSelection.CurrentPage => new List<int> { current },
+            PageRangeSelection.UserPages => PageRangeIndices(dlg.PageRange),
+            _ => Enumerable.Range(0, _pages.Count).ToList(),
+        };
+        if (pages.Count == 0) return;
+
+        var stamps = _stamps.Select(v => v.Model).ToList();
+        var fields = _fields;
+        var bytes = _bytes;
+        var password = _password;
+        var geometry = _pages.Select(p => p.Geometry).ToList();
+        try
+        {
+            _busy = true;
+            Mouse.OverrideCursor = Cursors.Wait;
+            SetStatus("Preparing to print…");
+            // Print exactly what a flattened save would contain, so form values and placed items look final.
+            var printable = await Task.Run(() => PdfSaver.Build(bytes, password, fields, stamps, flatten: true));
+            await PdfPrinter.PrintAsync(printable, password, geometry, pages, dlg,
+                Path.GetFileName(_path) ?? "PDF Editor document",
+                (i, n) => SetStatus($"Printing page {i} of {n}…"));
+            SetStatus($"Sent {pages.Count} page(s) to {dlg.PrintQueue.FullName}.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Printing failed.");
+            ShowError("Printing failed.", ex);
+        }
+        finally
+        {
+            _busy = false;
+            Mouse.OverrideCursor = null;
+        }
+    }
+
+    private List<int> PageRangeIndices(PageRange range)
+    {
+        int from = Math.Clamp(Math.Min(range.PageFrom, range.PageTo), 1, _pages.Count);
+        int to = Math.Clamp(Math.Max(range.PageFrom, range.PageTo), 1, _pages.Count);
+        return Enumerable.Range(from - 1, to - from + 1).ToList();
     }
 
     private bool ConfirmDiscardChanges()
@@ -850,6 +913,7 @@ public partial class MainWindow : Window
         bool hasDoc = _bytes != null;
         EmptyState.Visibility = hasDoc ? Visibility.Collapsed : Visibility.Visible;
         SaveButton.IsEnabled = SaveMenu.IsEnabled = SaveAsMenu.IsEnabled = SaveFlatMenu.IsEnabled = hasDoc;
+        PrintButton.IsEnabled = PrintMenu.IsEnabled = hasDoc;
         ToolsBar.IsEnabled = hasDoc;
         UndoButton.IsEnabled = _undo.Count > 0;
         RedoButton.IsEnabled = _redo.Count > 0;
@@ -888,6 +952,7 @@ public partial class MainWindow : Window
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveCurrentAsync();
     private async void SaveAs_Click(object sender, RoutedEventArgs e) => await SaveAsAsync(false);
     private async void SaveFlat_Click(object sender, RoutedEventArgs e) => await SaveAsAsync(true);
+    private async void Print_Click(object sender, RoutedEventArgs e) => await PrintAsync();
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
     private void Undo_Click(object sender, RoutedEventArgs e) => Undo();
     private void Redo_Click(object sender, RoutedEventArgs e) => Redo();
@@ -945,7 +1010,8 @@ public partial class MainWindow : Window
             "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo placed items. Ctrl+mouse wheel zooms.\n" +
-            "  • File › Save Flattened Copy makes form entries permanent (no longer editable).",
+            "  • File › Save Flattened Copy makes form entries permanent (no longer editable).\n" +
+            "  • Ctrl+P prints the document with everything you filled in, exactly as a flattened copy would look.",
             "How to use PDF Editor", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
@@ -1027,6 +1093,7 @@ public partial class MainWindow : Window
                 case Key.O: Open_Click(this, e); e.Handled = true; return;
                 case Key.S when shift: SaveAs_Click(this, e); e.Handled = true; return;
                 case Key.S: Save_Click(this, e); e.Handled = true; return;
+                case Key.P: Print_Click(this, e); e.Handled = true; return;
                 case Key.OemPlus or Key.Add: StepZoom(1); e.Handled = true; return;
                 case Key.OemMinus or Key.Subtract: StepZoom(-1); e.Handled = true; return;
                 case Key.D0 or Key.NumPad0: FitWidth(); e.Handled = true; return;

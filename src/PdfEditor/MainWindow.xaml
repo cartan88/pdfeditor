@@ -15,6 +15,8 @@
                 <MenuItem x:Name="SaveFlatMenu" Header="Save _Flattened Copy…" Click="SaveFlat_Click"
                           ToolTip="Saves a copy where form fields become ordinary page content and can no longer be edited" />
                 <Separator />
+                <MenuItem x:Name="PrintMenu" Header="_Print…" InputGestureText="Ctrl+P" Click="Print_Click" />
+                <Separator />
                 <MenuItem Header="E_xit" Click="Exit_Click" />
             </MenuItem>
             <MenuItem Header="_Edit">
@@ -43,6 +45,7 @@
             <ToolBar Background="{StaticResource ChromeBrush}">
                 <Button Style="{StaticResource ToolButton}" Click="Open_Click" ToolTip="Open a PDF (Ctrl+O)">📂 Open</Button>
                 <Button x:Name="SaveButton" Style="{StaticResource ToolButton}" Click="Save_Click" ToolTip="Save (Ctrl+S)">💾 Save</Button>
+                <Button x:Name="PrintButton" Style="{StaticResource ToolButton}" Click="Print_Click" ToolTip="Print (Ctrl+P)">🖨 Print</Button>
                 <Separator />
                 <Button x:Name="UndoButton" Style="{StaticResource ToolButton}" Click="Undo_Click" ToolTip="Undo (Ctrl+Z)">↶</Button>
                 <Button x:Name="RedoButton" Style="{StaticResource ToolButton}" Click="Redo_Click" ToolTip="Redo (Ctrl+Y)">↷</Button>

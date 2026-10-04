@@ -24,6 +24,25 @@ public static class PdfSaver
     public static void Save(byte[] original, string? password, IReadOnlyList<FormFieldModel> fields,
         IReadOnlyList<StampModel> stamps, bool flatten, string outputPath)
     {
+        var bytes = Build(original, password, fields, stamps, flatten);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
+        var temp = Path.Combine(dir, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            // A move within the same folder replaces the target atomically, so an interrupted save never leaves a truncated file.
+            File.Move(temp, outputPath, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { /* ignore */ }
+        }
+    }
+
+    /// <summary>Produces the edited document in memory (used for saving and printing).</summary>
+    public static byte[] Build(byte[] original, string? password, IReadOnlyList<FormFieldModel> fields,
+        IReadOnlyList<StampModel> stamps, bool flatten)
+    {
         var doc = PdfOpen.Open(original, password);
         var geometry = PdfOpen.ReadGeometry(doc);
         var bindings = FormReader.Read(doc);
@@ -59,18 +78,9 @@ public static class PdfSaver
             DrawStamps(page, geometry[group.Key], group);
         }
 
-        var dir = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
-        var temp = Path.Combine(dir, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            doc.Save(temp);
-            // A move within the same folder replaces the target atomically, so an interrupted save never leaves a truncated file.
-            File.Move(temp, outputPath, overwrite: true);
-        }
-        finally
-        {
-            try { File.Delete(temp); } catch { /* ignore */ }
-        }
+        using var ms = new MemoryStream();
+        doc.Save(ms, false);
+        return ms.ToArray();
     }
 
     private static bool NeedsAppearance(FieldBinding b) =>
