@@ -31,6 +31,15 @@ For coworkers who don't have .NET installed, build the standalone version. This 
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o ..\..\publish-standalone
 ```
 
+## Tests
+```
+dotnet test PdfEditor.slnx
+```
+The tests are in `tests\PdfEditor.Tests` (xUnit, about 80 tests, a few seconds). They cover page geometry, form reading and saving, field text layout (on-screen and saved text compared in pixels), tab order, undo/redo, images and EXIF orientation, page rendering, printing layout, editable placed items after reopening, and the encrypted signature library.
+
+- WPF code runs on one dedicated STA thread (`Infrastructure\Ui.cs`). The app's startup class is never created and no window is shown, so nothing appears on screen while the tests run.
+- Tests only write to temp folders. `samples\sample-form.pdf` is read-only input, and the signature tests never touch your real signature folder.
+
 ## How it works
 - Pages are rendered with the PDF engine built into Windows (`Windows.Data.Pdf`).
 - Editing and saving use [PDFsharp](https://www.pdfsharp.com/) (MIT license). Each save starts from the original file plus your changes, so saving more than once never duplicates content.
