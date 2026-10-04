@@ -18,6 +18,8 @@ public sealed class FormFieldModel : INotifyPropertyChanged
     public bool Comb { get; init; }
     public bool IsCombo { get; init; }
     public bool Editable { get; init; }
+    /// <summary>Signature field that already holds a certificate-based digital signature.</summary>
+    public bool IsSigned { get; init; }
     public int MaxLength { get; init; }
     /// <summary>Font size from the field's /DA string; 0 means auto.</summary>
     public double FontSize { get; init; }

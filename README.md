@@ -12,7 +12,7 @@ You can also drag a PDF onto the exe or the window, or use it with *Open with…
   - Drag to move. The corner handle resizes. The round top handle rotates the signature to any angle; hold Shift to snap to 15° steps.
   - **⟲ 90° / ⟳ 90°** (Ctrl+Shift+R / Ctrl+R) rotate the signature for vertical signature lines. You can also type an exact angle.
   - Yellow signature fields: click one and the signature is placed and fitted inside the box. Tall, narrow boxes are rotated automatically.
-- **White-out:** drag to cover existing content with a white box.
+- **White-out:** drag to cover existing content with a white box. This is a visual cover only, **not redaction**: the text underneath stays in the file and can still be selected, searched and copied.
 - **⧉ All pages:** copies the selected item (for example, your initials) onto every page.
 - **Image:** places a logo, stamp, or photo. You can also drop an image file onto a page.
 - Undo/redo (Ctrl+Z / Ctrl+Y), zoom (Ctrl+mouse wheel, Ctrl+ +/−, Ctrl+0 fits the width), and Del to delete the selected item.
@@ -38,4 +38,5 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ## Limitations
 - This app does not edit or delete existing text in the PDF. Use White-out and type over it.
 - Signatures are images, not cryptographic digital signatures (certificate-based signing).
+- Saving a PDF that already has a digital signature invalidates that signature. The app warns before doing this.
 - XFA forms (an old Adobe LiveCycle format) are not supported. Standard AcroForms are.

@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private List<FormFieldModel> _fields = new();
     private readonly List<StampView> _stamps = new();
     private bool _dirty;
+    private bool _saving;
+    private bool _signedWarningAccepted;
 
     // View state
     private readonly ScaleTransform _zoomTransform = new(PointsToDip, PointsToDip);
@@ -164,6 +166,8 @@ public partial class MainWindow : Window
             SetStatus(fillable > 0
                 ? $"Opened {Path.GetFileName(path)} – {fillable} fillable field(s). Click a field to type, or use the tools above."
                 : $"Opened {Path.GetFileName(path)} – no fillable fields; use Text, Date, ✓ and Sign to fill it in.");
+            if (_fields.Any(f => f.IsSigned))
+                SetStatus(StatusText.Text + " Note: this PDF is digitally signed; saving changes will invalidate that signature.");
         }
         catch (Exception ex)
         {
@@ -192,6 +196,7 @@ public partial class MainWindow : Window
         _path = null;
         _bytes = null;
         _dirty = false;
+        _signedWarningAccepted = false;
     }
 
     private void BuildFieldOverlays()
@@ -208,21 +213,23 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveAsync(string path, bool flatten)
     {
-        if (_bytes == null) return false;
+        if (_bytes == null || _saving) return false;
         CommitTextEdits();
+        if (!ConfirmBreakSignatures()) return false;
         var stamps = _stamps.Select(v => v.Model).ToList();
         var fields = _fields;
         var bytes = _bytes;
         var password = _password;
         try
         {
+            _saving = true;
             Mouse.OverrideCursor = Cursors.Wait;
             SetStatus("Saving…");
             await Task.Run(() => PdfSaver.Save(bytes, password, fields, stamps, flatten, path));
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowError("The file could not be written. If it is open in another program (such as a PDF viewer), close it there or use Save As.", ex);
+            ShowError("The file could not be written. If it is open in another program (such as a PDF viewer) or read-only, close it there or use Save As.", ex);
             return false;
         }
         catch (Exception ex)
@@ -232,6 +239,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _saving = false;
             Mouse.OverrideCursor = null;
         }
 
@@ -243,6 +251,22 @@ public partial class MainWindow : Window
         SetStatus($"Saved {(flatten ? "flattened copy " : "")}to {path}");
         UpdateUi();
         return true;
+    }
+
+    /// <summary>
+    /// Saving rewrites the whole file, which invalidates any existing certificate-based signatures.
+    /// Asks once per document before doing that.
+    /// </summary>
+    private bool ConfirmBreakSignatures()
+    {
+        if (_signedWarningAccepted || !_fields.Any(f => f.IsSigned)) return true;
+        var r = MessageBox.Show(this,
+            "This PDF contains a digital (certificate-based) signature.\n\n" +
+            "Saving changes will make that signature invalid – viewers such as Acrobat will report the document as modified or the signature as broken.\n\n" +
+            "Save anyway?",
+            "PDF Editor", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        _signedWarningAccepted = r == MessageBoxResult.Yes;
+        return _signedWarningAccepted;
     }
 
     private Task<bool> SaveCurrentAsync() =>
@@ -337,6 +361,7 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex)
                 {
+                    if (generation != _renderGeneration) return; // document was closed mid-render
                     SetStatus($"Could not render page {page.Index + 1}: {ex.Message}");
                 }
             }
@@ -655,7 +680,7 @@ public partial class MainWindow : Window
             Tool.Text => "Click on the page where the text should start. Esc to cancel.",
             Tool.Date => "Click on the page to insert today's date. Esc to cancel.",
             Tool.Check or Tool.Cross => "Click on the page to place the mark. Esc to cancel.",
-            Tool.Whiteout => "Drag a rectangle over the content to hide. Esc to cancel.",
+            Tool.Whiteout => "Drag a rectangle over the content to hide. This only covers it visually – the text underneath can still be selected and copied. Esc to cancel.",
             Tool.PlaceImage => _pendingIsSignature
                 ? "Click on the page where your signature should go (you can move, resize and rotate it afterwards). Esc to cancel."
                 : "Click on the page to place the image. Esc to cancel.",
@@ -917,7 +942,8 @@ public partial class MainWindow : Window
             "  • Yellow signature fields: click them to drop your signature right in the box.\n\n" +
             "Other\n" +
             "  • Double-click placed text to edit it. Del deletes, arrows nudge (Shift = 10×).\n" +
-            "  • White-out hides existing content under a white box.\n" +
+            "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
+            "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo placed items. Ctrl+mouse wheel zooms.\n" +
             "  • File › Save Flattened Copy makes form entries permanent (no longer editable).",
             "How to use PDF Editor", MessageBoxButton.OK, MessageBoxImage.Information);

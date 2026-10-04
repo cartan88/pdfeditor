@@ -7,16 +7,47 @@ namespace PdfEditor.Services;
 
 public static class ImageUtil
 {
+    /// <summary>Loads an image file, applying its EXIF orientation (phone photos are often stored sideways).</summary>
     public static BitmapSource Load(string path)
     {
-        var bi = new BitmapImage();
-        bi.BeginInit();
-        bi.CacheOption = BitmapCacheOption.OnLoad;
-        bi.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-        bi.UriSource = new Uri(Path.GetFullPath(path));
-        bi.EndInit();
-        bi.Freeze();
-        return bi;
+        var frame = BitmapFrame.Create(new Uri(Path.GetFullPath(path)), BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
+        BitmapSource result = frame;
+        var transform = OrientationTransform(ReadOrientation(frame));
+        if (transform != null) result = new TransformedBitmap(frame, transform);
+        result.Freeze();
+        return result;
+    }
+
+    private static int ReadOrientation(BitmapFrame frame)
+    {
+        if (frame.Metadata is not BitmapMetadata meta) return 1;
+        foreach (var query in new[] { "/app1/ifd/{ushort=274}", "/ifd/{ushort=274}" })
+        {
+            try
+            {
+                if (meta.ContainsQuery(query) && meta.GetQuery(query) is ushort o) return o;
+            }
+            catch (Exception) { /* format without that metadata block */ }
+        }
+        return 1;
+    }
+
+    /// <summary>Transform that turns an image stored with the given EXIF orientation upright.</summary>
+    private static Transform? OrientationTransform(int orientation)
+    {
+        var flipH = new ScaleTransform(-1, 1);
+        var flipV = new ScaleTransform(1, -1);
+        return orientation switch
+        {
+            2 => flipH,
+            3 => new RotateTransform(180),
+            4 => flipV,
+            5 => new TransformGroup { Children = { new RotateTransform(90), flipH } },  // transpose
+            6 => new RotateTransform(90),
+            7 => new TransformGroup { Children = { new RotateTransform(90), flipV } },  // transverse
+            8 => new RotateTransform(270),
+            _ => null,
+        };
     }
 
     public static BitmapSource FromPng(byte[] png)

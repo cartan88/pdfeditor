@@ -60,7 +60,7 @@
                 <RadioButton x:Name="CrossTool" Style="{StaticResource ToolRadio}" Checked="Tool_Checked"
                              ToolTip="Click to place a cross">✗</RadioButton>
                 <RadioButton x:Name="WhiteoutTool" Style="{StaticResource ToolRadio}" Checked="Tool_Checked"
-                             ToolTip="Drag on the page to cover existing content with a white box">▭ White-out</RadioButton>
+                             ToolTip="Drag on the page to cover existing content with a white box (visual only – not redaction; the text underneath stays in the file)">▭ White-out</RadioButton>
                 <Separator />
                 <Button Style="{StaticResource ToolButton}" Click="Signature_Click" FontWeight="SemiBold"
                         ToolTip="Add your signature or initials (draw, or import a scanned image)">✍ Sign</Button>

@@ -117,6 +117,7 @@ public static class FormReader
             Comb = (ff & FfComb) != 0,
             IsCombo = (ff & FfCombo) != 0,
             Editable = (ff & FfEdit) != 0,
+            IsSigned = kind == FieldKind.Signature && GetInherited(node, "/V") is PdfDictionary,
             MaxLength = (int)(GetNumber(GetInherited(node, "/MaxLen")) ?? 0),
             FontSize = ParseFontSize(da),
             Alignment = q,

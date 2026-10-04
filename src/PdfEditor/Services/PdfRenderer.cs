@@ -12,6 +12,7 @@ public sealed class PdfRenderer : IDisposable
     private readonly WinPdfDocument _doc;
     private readonly InMemoryRandomAccessStream _source;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private bool _disposed;
 
     private PdfRenderer(WinPdfDocument doc, InMemoryRandomAccessStream source)
     {
@@ -43,9 +44,15 @@ public sealed class PdfRenderer : IDisposable
         await _gate.WaitAsync();
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             using var page = _doc.GetPage((uint)pageIndex);
             using var output = new InMemoryRandomAccessStream();
-            var options = new PdfPageRenderOptions { DestinationWidth = (uint)Math.Clamp(pixelWidth, 16, 8000) };
+            var options = new PdfPageRenderOptions
+            {
+                DestinationWidth = (uint)Math.Clamp(pixelWidth, 16, 8000),
+                // BMP is far cheaper to encode and decode than the default PNG.
+                BitmapEncoderId = Windows.Graphics.Imaging.BitmapEncoder.BmpEncoderId,
+            };
             await page.RenderToStreamAsync(output, options);
 
             var ms = new MemoryStream();
@@ -61,13 +68,23 @@ public sealed class PdfRenderer : IDisposable
         }
         finally
         {
+            if (_disposed) _source.Dispose(); // Dispose() was called while this render was running
             _gate.Release();
         }
     }
 
+    /// <summary>
+    /// Releases the document stream. If a render is in progress, the stream is released when it finishes;
+    /// the gate is never disposed so an in-flight render can always release it.
+    /// </summary>
     public void Dispose()
     {
-        _source.Dispose();
-        _gate.Dispose();
+        if (_disposed) return;
+        _disposed = true;
+        if (_gate.Wait(0))
+        {
+            _source.Dispose();
+            _gate.Release();
+        }
     }
 }

@@ -64,7 +64,8 @@ public static class PdfSaver
         try
         {
             doc.Save(temp);
-            File.Copy(temp, outputPath, overwrite: true);
+            // A move within the same folder replaces the target atomically, so an interrupted save never leaves a truncated file.
+            File.Move(temp, outputPath, overwrite: true);
         }
         finally
         {
