@@ -26,7 +26,7 @@ public partial class MainWindow : Window
     private enum Tool { Select, Text, Date, Check, Cross, Whiteout, PlaceImage }
 
     private record StampState(StampKind Kind, int Page, double Cx, double Cy, double W, double H, double Angle,
-        string Text, double FontSize, Color Color, string Font, byte[]? Png);
+        string Text, double FontSize, Color Color, string Font, byte[]? Data);
 
     // Document state
     private string? _path;
@@ -620,7 +620,7 @@ public partial class MainWindow : Window
     }
 
     private List<StampState> Snapshot() => _stamps.Select(v => v.Model).Select(m =>
-        new StampState(m.Kind, m.PageIndex, m.CenterX, m.CenterY, m.Width, m.Height, m.Angle, m.Text, m.FontSize, m.Color, m.FontFamily, m.ImagePng)).ToList();
+        new StampState(m.Kind, m.PageIndex, m.CenterX, m.CenterY, m.Width, m.Height, m.Angle, m.Text, m.FontSize, m.Color, m.FontFamily, m.ImageData)).ToList();
 
     private void PushUndo(List<StampState> before)
     {
@@ -654,7 +654,7 @@ public partial class MainWindow : Window
         {
             var m = new StampModel
             {
-                Kind = s.Kind, PageIndex = s.Page, ImagePng = s.Png,
+                Kind = s.Kind, PageIndex = s.Page, ImageData = s.Data,
                 Text = s.Text, FontSize = s.FontSize, Color = s.Color, FontFamily = s.Font,
             };
             m.Width = s.W; m.Height = s.H; m.CenterX = s.Cx; m.CenterY = s.Cy; m.Angle = s.Angle;
@@ -703,7 +703,7 @@ public partial class MainWindow : Window
             {
                 var m = new StampModel
                 {
-                    Kind = src.Kind, PageIndex = page.Index, ImagePng = src.ImagePng, Text = src.Text,
+                    Kind = src.Kind, PageIndex = page.Index, ImageData = src.ImageData, Text = src.Text,
                     FontSize = src.FontSize, Color = src.Color, FontFamily = src.FontFamily,
                 };
                 m.Width = src.Width; m.Height = src.Height; m.Angle = src.Angle;
@@ -819,10 +819,10 @@ public partial class MainWindow : Window
 
             case Tool.PlaceImage when _pendingImage != null:
             {
-                var img = ImageUtil.FromPng(_pendingImage);
+                var img = ImageUtil.FromBytes(_pendingImage);
                 double aspect = (double)img.PixelWidth / img.PixelHeight;
                 double w = _pendingIsSignature ? 160 : Math.Min(220, img.PixelWidth * 0.75);
-                var m = new StampModel { Kind = StampKind.Image, PageIndex = page.Index, ImagePng = _pendingImage };
+                var m = new StampModel { Kind = StampKind.Image, PageIndex = page.Index, ImageData = _pendingImage };
                 m.Width = w; m.Height = w / aspect; m.CenterX = p.X; m.CenterY = p.Y;
                 Mutate(() => AddStamp(m));
                 break;
@@ -879,11 +879,11 @@ public partial class MainWindow : Window
         m.CenterY = p.Y - lineHeight / 2 - PdfSaver.TextPadding + m.Height / 2;
     }
 
-    private void BeginPlaceImage(byte[] png, bool signature)
+    private void BeginPlaceImage(byte[] image, bool signature)
     {
         _pendingIsSignature = signature;
         SetTool(Tool.PlaceImage);
-        _pendingImage = png;
+        _pendingImage = image;
         SelectTool.IsChecked = false;
     }
 
@@ -891,12 +891,12 @@ public partial class MainWindow : Window
     {
         var dlg = new SignatureDialog { Owner = this };
         if (dlg.ShowDialog() != true || dlg.SelectedPng == null) return;
-        var img = ImageUtil.FromPng(dlg.SelectedPng);
+        var img = ImageUtil.FromBytes(dlg.SelectedPng);
         double aspect = (double)img.PixelWidth / img.PixelHeight;
         bool vertical = r.Height > r.Width * 1.3;
         double length = vertical ? r.Height : r.Width, thickness = vertical ? r.Width : r.Height;
         double w = Math.Min(length * 0.95, thickness * 1.1 * aspect);
-        var m = new StampModel { Kind = StampKind.Image, PageIndex = widget.PageIndex, ImagePng = dlg.SelectedPng };
+        var m = new StampModel { Kind = StampKind.Image, PageIndex = widget.PageIndex, ImageData = dlg.SelectedPng };
         m.Width = w; m.Height = w / aspect;
         m.CenterX = r.X + r.Width / 2; m.CenterY = r.Y + r.Height / 2;
         m.Angle = vertical ? 270 : 0;
@@ -985,8 +985,7 @@ public partial class MainWindow : Window
         if (ofd.ShowDialog(this) != true) return;
         try
         {
-            var png = ImageUtil.ToPng(ImageUtil.Load(ofd.FileName));
-            BeginPlaceImage(png, signature: false);
+            BeginPlaceImage(ImageUtil.PrepareForPlacement(ofd.FileName), signature: false);
         }
         catch (Exception ex)
         {
@@ -1170,11 +1169,11 @@ public partial class MainWindow : Window
             if (page == null) { SetStatus("Drop the image onto a page to place it."); return; }
             try
             {
-                var png = ImageUtil.ToPng(ImageUtil.Load(file));
-                var img = ImageUtil.FromPng(png);
+                var data = ImageUtil.PrepareForPlacement(file);
+                var img = ImageUtil.FromBytes(data);
                 var p = e.GetPosition(page.Surface);
                 double w = Math.Min(220, img.PixelWidth * 0.75);
-                var m = new StampModel { Kind = StampKind.Image, PageIndex = page.Index, ImagePng = png };
+                var m = new StampModel { Kind = StampKind.Image, PageIndex = page.Index, ImageData = data };
                 m.Width = w; m.Height = w * img.PixelHeight / img.PixelWidth; m.CenterX = p.X; m.CenterY = p.Y;
                 Mutate(() => AddStamp(m));
             }

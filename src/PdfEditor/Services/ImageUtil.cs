@@ -7,6 +7,12 @@ namespace PdfEditor.Services;
 
 public static class ImageUtil
 {
+    /// <summary>Longest side, in pixels, of an image placed on a page (about 8 inches at 300 DPI).</summary>
+    public const int MaxPlacedDimension = 2400;
+
+    /// <summary>Opaque lossless images larger than this are re-checked as JPEG (scans and photos saved as PNG/TIFF/BMP).</summary>
+    private const int LosslessSizeLimit = 1024 * 1024;
+
     /// <summary>Loads an image file, applying its EXIF orientation (phone photos are often stored sideways).</summary>
     public static BitmapSource Load(string path)
     {
@@ -16,6 +22,50 @@ public static class ImageUtil
         if (transform != null) result = new TransformedBitmap(frame, transform);
         result.Freeze();
         return result;
+    }
+
+    /// <summary>
+    /// Reads an image file for placing on a page and returns compact PNG or JPEG bytes:
+    /// the image is turned upright and scaled down to <see cref="MaxPlacedDimension"/>. JPEG photos stay JPEG
+    /// (passed through untouched when no change is needed), images with transparency stay PNG, and other
+    /// lossless images stay PNG unless that would be large and a JPEG is much smaller.
+    /// </summary>
+    public static byte[] PrepareForPlacement(string path)
+    {
+        var original = File.ReadAllBytes(path);
+        var frame = BitmapFrame.Create(new MemoryStream(original), BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
+        int orientation = ReadOrientation(frame);
+        bool isJpeg = frame.Decoder is JpegBitmapDecoder;
+        bool tooBig = Math.Max(frame.PixelWidth, frame.PixelHeight) > MaxPlacedDimension;
+
+        // CMYK JPEGs are re-encoded: their embedding in PDFs is unreliable (often inverted colours).
+        if (isJpeg && !tooBig && orientation == 1 && frame.Format != PixelFormats.Cmyk32) return original;
+
+        BitmapSource image = frame;
+        if (OrientationTransform(orientation) is { } t) image = new TransformedBitmap(image, t);
+        double scale = (double)MaxPlacedDimension / Math.Max(image.PixelWidth, image.PixelHeight);
+        if (scale < 1) image = new TransformedBitmap(image, new ScaleTransform(scale, scale));
+        var bgra = new FormatConvertedBitmap(image, PixelFormats.Bgra32, null, 0);
+        bgra.Freeze();
+
+        if (isJpeg) return ToJpeg(bgra);
+        var png = ToPng(bgra);
+        if (png.Length > LosslessSizeLimit && IsOpaque(bgra))
+        {
+            var jpeg = ToJpeg(bgra);
+            if (jpeg.Length < png.Length / 2) return jpeg;
+        }
+        return png;
+    }
+
+    private static bool IsOpaque(BitmapSource bgra)
+    {
+        int stride = bgra.PixelWidth * 4;
+        var px = new byte[stride * bgra.PixelHeight];
+        bgra.CopyPixels(px, stride, 0);
+        for (int i = 3; i < px.Length; i += 4)
+            if (px[i] != 255) return false;
+        return true;
     }
 
     private static int ReadOrientation(BitmapFrame frame)
@@ -50,23 +100,40 @@ public static class ImageUtil
         };
     }
 
-    public static BitmapSource FromPng(byte[] png)
+    /// <summary>Decodes encoded image bytes (PNG or JPEG).</summary>
+    public static BitmapSource FromBytes(byte[] data)
     {
         var bi = new BitmapImage();
         bi.BeginInit();
         bi.CacheOption = BitmapCacheOption.OnLoad;
-        bi.StreamSource = new MemoryStream(png);
+        bi.StreamSource = new MemoryStream(data);
         bi.EndInit();
         bi.Freeze();
         return bi;
     }
 
-    public static byte[] ToPng(BitmapSource source)
+    public static byte[] ToPng(BitmapSource source) => Encode(new PngBitmapEncoder(), source);
+
+    public static byte[] ToJpeg(BitmapSource source, int quality = 90)
     {
-        var enc = new PngBitmapEncoder();
-        enc.Frames.Add(BitmapFrame.Create(source));
+        // JPEG has no alpha; flatten onto white so transparent areas don't turn black.
+        var white = new DrawingVisual();
+        using (var dc = white.RenderOpen())
+        {
+            var rect = new Rect(0, 0, source.PixelWidth, source.PixelHeight);
+            dc.DrawRectangle(Brushes.White, null, rect);
+            dc.DrawImage(source, rect);
+        }
+        var rtb = new RenderTargetBitmap(source.PixelWidth, source.PixelHeight, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(white);
+        return Encode(new JpegBitmapEncoder { QualityLevel = quality }, new FormatConvertedBitmap(rtb, PixelFormats.Bgr24, null, 0));
+    }
+
+    private static byte[] Encode(BitmapEncoder encoder, BitmapSource source)
+    {
+        encoder.Frames.Add(BitmapFrame.Create(source));
         using var ms = new MemoryStream();
-        enc.Save(ms);
+        encoder.Save(ms);
         return ms.ToArray();
     }
 

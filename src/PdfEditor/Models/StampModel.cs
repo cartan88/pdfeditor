@@ -1,8 +1,8 @@
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using PdfEditor.Services;
 
 namespace PdfEditor.Models;
 
@@ -22,27 +22,11 @@ public sealed class StampModel : INotifyPropertyChanged
     public required StampKind Kind { get; init; }
     public required int PageIndex { get; init; }
 
-    /// <summary>PNG bytes for image stamps.</summary>
-    public byte[]? ImagePng { get; init; }
+    /// <summary>Encoded image bytes (PNG or JPEG) for image stamps.</summary>
+    public byte[]? ImageData { get; init; }
 
     private BitmapSource? _image;
-    public BitmapSource? Image
-    {
-        get
-        {
-            if (_image == null && ImagePng != null)
-            {
-                var bi = new BitmapImage();
-                bi.BeginInit();
-                bi.CacheOption = BitmapCacheOption.OnLoad;
-                bi.StreamSource = new MemoryStream(ImagePng);
-                bi.EndInit();
-                bi.Freeze();
-                _image = bi;
-            }
-            return _image;
-        }
-    }
+    public BitmapSource? Image => _image ??= ImageData != null ? ImageUtil.FromBytes(ImageData) : null;
 
     public double CenterX { get => _centerX; set => Set(ref _centerX, value); }
     public double CenterY { get => _centerY; set => Set(ref _centerY, value); }

@@ -25,7 +25,7 @@ public partial class SignatureDialog : Window
         var entries = new List<Entry>();
         foreach (var path in SignatureLibrary.List())
         {
-            try { entries.Add(new Entry(path, ImageUtil.FromPng(File.ReadAllBytes(path)))); }
+            try { entries.Add(new Entry(path, ImageUtil.FromBytes(File.ReadAllBytes(path)))); }
             catch { /* skip unreadable files */ }
         }
         List.ItemsSource = entries;

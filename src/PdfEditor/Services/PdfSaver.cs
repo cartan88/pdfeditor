@@ -366,8 +366,8 @@ public static class PdfSaver
                 case StampKind.Whiteout:
                     g.DrawRectangle(XBrushes.White, x, y, s.Width, s.Height);
                     break;
-                case StampKind.Image when s.ImagePng != null:
-                    using (var img = XImage.FromStream(new MemoryStream(s.ImagePng)))
+                case StampKind.Image when s.ImageData != null:
+                    using (var img = XImage.FromStream(new MemoryStream(s.ImageData)))
                         g.DrawImage(img, x, y, s.Width, s.Height);
                     break;
                 case StampKind.Text:
