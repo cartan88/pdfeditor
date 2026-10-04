@@ -11,7 +11,7 @@
     <AssemblyName>PdfEditor</AssemblyName>
     <RootNamespace>PdfEditor</RootNamespace>
     <Product>PDF Editor</Product>
-    <Version>1.1.5</Version>
+    <Version>1.1.6</Version>
   </PropertyGroup>
 
   <ItemGroup>
