@@ -76,8 +76,11 @@ public static class PdfSaver
         {
             if (group.Key < 0 || group.Key >= doc.PageCount) continue;
             var page = doc.Pages[group.Key];
+            var before = StampStore.Capture(page);
             if (wrapped.Add(group.Key)) WrapExistingContent(page);
             DrawStamps(page, geometry[group.Key], group);
+            // Flattened copies (and printing) keep items permanent; normal saves record them so reopening can edit them.
+            if (!flatten) StampStore.Record(doc, page, geometry[group.Key], group, before);
         }
 
         using var ms = new MemoryStream();

@@ -17,7 +17,7 @@ You can also drag a PDF onto the exe or the window, or use it with *Open with…
 - **Image:** places a logo, stamp, or photo. You can also drop an image file onto a page. Large images are scaled down to 2400 px on the longest side. Photos stay JPEG and images with transparency stay PNG, so a 12-megapixel phone photo adds about 1.4 MB to the PDF instead of about 18 MB.
 - Undo/redo (Ctrl+Z / Ctrl+Y) for form entries and placed items. Typing in one field is undone as a single step. Zoom (Ctrl+mouse wheel, Ctrl+ +/−, Ctrl+0 fits the width), and Del to delete the selected item.
 - **Print** (Ctrl+P) prints everything you filled in, exactly as a flattened copy would look. You can choose a page range, the current page, or the number of copies. Oversized pages are shrunk to fit, and landscape pages are rotated to fit the paper.
-- **Save** keeps the form fields editable. **File › Save Flattened Copy** turns everything into permanent page content.
+- **Save** keeps the form fields editable. Text, signatures, images and white-out you placed can also still be moved and edited when you reopen the file in PDF Editor. Other viewers show them as normal page content. If another program changes a page, the items on that page become permanent. **File › Save Flattened Copy** turns everything into permanent page content.
 - Opens password-protected PDFs and permission-restricted PDFs.
 
 ## Build from source

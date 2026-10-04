@@ -150,6 +150,13 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            // Items placed by an earlier save come back as editable objects; the page itself is shown without them.
+            var restored = await Task.Run(() => StampStore.Extract(bytes, password));
+            if (restored.PagesRestored > 0)
+            {
+                bytes = restored.Bytes;
+                doc = PdfOpen.Open(bytes, password);
+            }
             var geometry = PdfOpen.ReadGeometry(doc);
             var fields = FormReader.Read(doc).Select(b => b.Model).ToList();
             var renderer = await PdfRenderer.LoadAsync(bytes, password);
@@ -175,6 +182,7 @@ public partial class MainWindow : Window
                 PagesPanel.Children.Add(pv);
             }
             BuildFieldOverlays();
+            foreach (var stamp in restored.Stamps.Where(s => s.PageIndex < _pages.Count)) AddStamp(stamp, select: false);
 
             _dirty = false;
             _fitWidth = true;
@@ -185,6 +193,10 @@ public partial class MainWindow : Window
             SetStatus(fillable > 0
                 ? $"Opened {Path.GetFileName(path)} – {fillable} fillable field(s). Click a field to type, or use the tools above."
                 : $"Opened {Path.GetFileName(path)} – no fillable fields; use Text, Date, ✓ and Sign to fill it in.");
+            if (restored.Stamps.Count > 0)
+                SetStatus(StatusText.Text + $" {restored.Stamps.Count} item(s) you placed earlier can be moved and edited.");
+            if (restored.PagesSkipped > 0)
+                SetStatus(StatusText.Text + $" Items on {restored.PagesSkipped} page(s) were changed in another program and are now part of the page.");
             if (_fields.Any(f => f.IsSigned))
                 SetStatus(StatusText.Text + " Note: this PDF is digitally signed; saving changes will invalidate that signature.");
         }
@@ -1106,7 +1118,8 @@ public partial class MainWindow : Window
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo form entries and placed items (inside a field, Ctrl+Z undoes typing there).\n" +
             "  • Ctrl+mouse wheel zooms.\n" +
-            "  • File › Save Flattened Copy makes form entries permanent (no longer editable).\n" +
+            "  • Items you place stay movable and editable when you reopen the saved file here.\n" +
+            "  • File › Save Flattened Copy makes form entries and placed items permanent (no longer editable).\n" +
             "  • Ctrl+P prints the document with everything you filled in, exactly as a flattened copy would look.",
             "How to use PDF Editor", MessageBoxButton.OK, MessageBoxImage.Information);
     }
