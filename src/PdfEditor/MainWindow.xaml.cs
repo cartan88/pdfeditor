@@ -17,6 +17,8 @@ namespace PdfEditor;
 public partial class MainWindow : Window
 {
     private const double PointsToDip = 96.0 / 72.0;
+    /// <summary>Largest full-page bitmap kept per page (8 MP = 32 MB); higher zoom uses a detail bitmap of the visible area.</summary>
+    private const double MaxPagePixels = 8_000_000;
     private static readonly double[] ZoomSteps = { 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5 };
     private static readonly (string Name, Color Color)[] InkColors =
     {
@@ -393,7 +395,7 @@ public partial class MainWindow : Window
             double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
             double viewport = Math.Max(Scroller.ViewportHeight, 200);
 
-            // Visible pages first (by distance from the viewport centre), then neighbours.
+            // Visible pages first (by distance from the viewport), then neighbours.
             var candidates = new List<(PageView Page, double Distance)>();
             foreach (var page in _pages)
             {
@@ -401,26 +403,35 @@ public partial class MainWindow : Window
                 try { bounds = page.TransformToAncestor(Scroller).TransformBounds(new Rect(page.RenderSize)); }
                 catch (InvalidOperationException) { continue; }
                 double distance = bounds.Bottom < 0 ? -bounds.Bottom : bounds.Top > viewport ? bounds.Top - viewport : 0;
-                if (distance > viewport * 3)
+                if (distance > viewport * 2)
                 {
-                    if (page.PageImage.Source != null) { page.PageImage.Source = null; page.RenderedWidth = 0; }
+                    page.ClearRender();
                     continue;
                 }
-                if (distance <= viewport * 1.0) candidates.Add((page, distance));
+                if (distance > 0) page.ClearDetail();
+                if (distance <= viewport) candidates.Add((page, distance));
             }
 
-            foreach (var (page, _) in candidates.OrderBy(c => c.Distance))
+            foreach (var (page, distance) in candidates.OrderBy(c => c.Distance))
             {
                 if (generation != _renderGeneration || _renderer == null) return;
-                int required = (int)Math.Ceiling(page.Geometry.ViewWidth * PointsToDip * _zoom * dpi);
-                required = Math.Min(required, 6000);
-                if (page.RenderedWidth > 0 && Math.Abs(page.RenderedWidth - required) <= required * 0.15) continue;
+                var g = page.Geometry;
+                double density = PointsToDip * _zoom * dpi; // device pixels per point
+                double fullWidth = g.ViewWidth * density;
+                // Full-page bitmap, capped so a page never takes more than about MaxPagePixels * 4 bytes.
+                int baseWidth = (int)Math.Ceiling(Math.Min(fullWidth, Math.Sqrt(MaxPagePixels * g.ViewWidth / g.ViewHeight)));
+                bool needsDetail = distance == 0 && fullWidth > baseWidth * 1.05;
                 try
                 {
-                    var bmp = await _renderer.RenderAsync(page.Index, required);
-                    if (generation != _renderGeneration) return;
-                    page.PageImage.Source = bmp;
-                    page.RenderedWidth = required;
+                    if (page.RenderedWidth == 0 || Math.Abs(page.RenderedWidth - baseWidth) > baseWidth * 0.15)
+                    {
+                        var bmp = await _renderer.RenderAsync(page.Index, baseWidth);
+                        if (generation != _renderGeneration) return;
+                        page.PageImage.Source = bmp;
+                        page.RenderedWidth = baseWidth;
+                    }
+                    if (!needsDetail) page.ClearDetail();
+                    else await RenderDetailAsync(page, density, generation);
                 }
                 catch (Exception ex)
                 {
@@ -433,6 +444,32 @@ public partial class MainWindow : Window
         {
             _renderLoopRunning = false;
         }
+    }
+
+    /// <summary>
+    /// When zoomed in too far for a full-page bitmap, renders just the visible part of the page (plus a margin
+    /// so small scrolls don't need a new render) at full sharpness. Its size is bounded by the window, not the zoom.
+    /// </summary>
+    private async Task RenderDetailAsync(PageView page, double density, int generation)
+    {
+        var g = page.Geometry;
+        var pageRect = new Rect(0, 0, g.ViewWidth, g.ViewHeight);
+        Rect visible;
+        try { visible = Scroller.TransformToDescendant(page.Surface).TransformBounds(new Rect(0, 0, Scroller.ViewportWidth, Scroller.ViewportHeight)); }
+        catch (InvalidOperationException) { return; }
+        visible.Intersect(pageRect);
+        if (visible.IsEmpty || visible.Width < 1 || visible.Height < 1) { page.ClearDetail(); return; }
+
+        if (page.DetailRegion.Contains(visible) && Math.Abs(page.DetailDensity - density) <= density * 0.15) return;
+
+        var region = visible;
+        region.Inflate(visible.Width * 0.25, visible.Height * 0.25);
+        region.Intersect(pageRect);
+        int pixelWidth = (int)Math.Ceiling(region.Width * density);
+        var fraction = new Rect(region.X / g.ViewWidth, region.Y / g.ViewHeight, region.Width / g.ViewWidth, region.Height / g.ViewHeight);
+        var bmp = await _renderer!.RenderAsync(page.Index, pixelWidth, fraction);
+        if (generation != _renderGeneration) return;
+        page.SetDetail(bmp, region);
     }
 
     private void SetZoom(double zoom, Point? anchor = null)

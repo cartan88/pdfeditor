@@ -32,9 +32,13 @@ public sealed class PageView : Border
         };
         PageImage = new Image { Stretch = Stretch.Fill };
         RenderOptions.SetBitmapScalingMode(PageImage, BitmapScalingMode.HighQuality);
+        DetailImage = new Image { Stretch = Stretch.Fill, Visibility = Visibility.Collapsed };
+        var detailLayer = new Canvas { IsHitTestVisible = false };
+        detailLayer.Children.Add(DetailImage);
         FieldLayer = new Canvas();
         StampLayer = new Canvas();
         Surface.Children.Add(PageImage);
+        Surface.Children.Add(detailLayer);
         Surface.Children.Add(FieldLayer);
         Surface.Children.Add(StampLayer);
         Child = Surface;
@@ -49,5 +53,45 @@ public sealed class PageView : Border
 
     /// <summary>Pixel width of the bitmap currently shown (0 = none).</summary>
     public int RenderedWidth { get; set; }
-    public int RequestedWidth { get; set; }
+
+    /// <summary>
+    /// Sharp rendering of just the visible part of the page, used when the full page at the current zoom
+    /// would be too large to keep in memory. Positioned in view space (points) over <see cref="PageImage"/>.
+    /// </summary>
+    public Image DetailImage { get; }
+
+    /// <summary>Area covered by <see cref="DetailImage"/>, in view space points (empty = none).</summary>
+    public Rect DetailRegion { get; private set; } = Rect.Empty;
+
+    /// <summary>Pixels per point of <see cref="DetailImage"/>.</summary>
+    public double DetailDensity { get; private set; }
+
+    public void SetDetail(System.Windows.Media.Imaging.BitmapSource bitmap, Rect region)
+    {
+        DetailImage.Source = bitmap;
+        DetailImage.Width = region.Width;
+        DetailImage.Height = region.Height;
+        Canvas.SetLeft(DetailImage, region.X);
+        Canvas.SetTop(DetailImage, region.Y);
+        DetailImage.Visibility = Visibility.Visible;
+        DetailRegion = region;
+        DetailDensity = bitmap.PixelWidth / region.Width;
+    }
+
+    public void ClearDetail()
+    {
+        if (DetailImage.Source == null) return;
+        DetailImage.Source = null;
+        DetailImage.Visibility = Visibility.Collapsed;
+        DetailRegion = Rect.Empty;
+        DetailDensity = 0;
+    }
+
+    /// <summary>Drops both bitmaps (page far off screen).</summary>
+    public void ClearRender()
+    {
+        PageImage.Source = null;
+        RenderedWidth = 0;
+        ClearDetail();
+    }
 }
