@@ -66,6 +66,14 @@ public class MainWindowTests
     }
 
     [Fact]
+    public Task WindowUsesTheAppIconAtEverySize() => Ui.Run(() =>
+    {
+        var icon = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapFrame>(new MainWindow().Icon);
+        var sizes = icon.Decoder.Frames.Select(f => f.PixelWidth).OrderBy(s => s);
+        Assert.Equal(new[] { 16, 20, 24, 32, 40, 48, 64, 128, 256 }, sizes);
+    });
+
+    [Fact]
     public Task UndoCoversFieldEditsAndPlacedItems() => Ui.Run(async () =>
     {
         var d = await Open(TempCopyOfSample());

@@ -40,6 +40,12 @@ The tests are in `tests\PdfEditor.Tests` (xUnit, about 80 tests, a few seconds).
 - WPF code runs on one dedicated STA thread (`Infrastructure\Ui.cs`). The app's startup class is never created and no window is shown, so nothing appears on screen while the tests run.
 - Tests only write to temp folders. `samples\sample-form.pdf` is read-only input, and the signature tests never touch your real signature folder.
 
+## Icon
+`src\PdfEditor\Assets\app.ico` is drawn in code by `tools\IconGenerator`: a form page with a signature and a pen, at 16–256 px, with a simplified drawing for the smallest sizes. To change it, edit the drawing code and regenerate:
+```
+dotnet run --project tools\IconGenerator -- src\PdfEditor\Assets
+```
+
 ## How it works
 - Pages are rendered with the PDF engine built into Windows (`Windows.Data.Pdf`).
 - Editing and saving use [PDFsharp](https://www.pdfsharp.com/) (MIT license). Each save starts from the original file plus your changes, so saving more than once never duplicates content.
