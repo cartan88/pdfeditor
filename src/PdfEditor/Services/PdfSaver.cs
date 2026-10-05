@@ -397,17 +397,20 @@ public static class PdfSaver
     {
         var lines = s.Text.Replace("\r\n", "\n").Split('\n');
         string family = FontPicker.PickFor(s.Text, s.FontFamily);
-        var font = MakeFont(family, s.FontSize);
+        var style = (s.Bold, s.Italic) switch
+        {
+            (true, true) => XFontStyleEx.BoldItalic,
+            (true, false) => XFontStyleEx.Bold,
+            (false, true) => XFontStyleEx.Italic,
+            _ => XFontStyleEx.Regular,
+        };
+        var font = new XFont(family, s.FontSize, style, new XPdfFontOptions(PdfFontEncoding.Unicode));
         var c = s.Color;
         var brush = new XSolidBrush(XColor.FromArgb(c.A, c.R, c.G, c.B));
         double lineHeight = s.FontSize * LineSpacing;
 
-        // Place the baseline the way WPF does for a fixed line height: split the extra space by ascent/descent ratio.
-        var metrics = font.Metrics;
-        double ascent = metrics.Ascent, descent = Math.Abs(metrics.Descent);
-        double baselineRatio = ascent + descent > 0 ? ascent / (ascent + descent) : 0.8;
-        double emHeight = s.FontSize * (ascent + descent) / metrics.UnitsPerEm;
-        double baselineOffset = (lineHeight - emHeight) / 2 + emHeight * baselineRatio;
+        // Place the baseline where the on-screen TextBlock (fixed line height) puts it, using WPF's own font metrics.
+        double baselineOffset = FieldText.CenteredBaseline(family, s.FontSize, lineHeight);
 
         for (int i = 0; i < lines.Length; i++)
         {

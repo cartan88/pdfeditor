@@ -8,6 +8,7 @@ You can also drag a PDF onto the exe or the window, or use it with *Open with…
 ## Features
 - **Fillable forms (AcroForm):** text fields (including multi-line and comb fields), check boxes, radio buttons, and drop-downs. Fields are highlighted in blue; click one and type. Tab moves through fields in reading order (row by row, or column by column if the PDF asks for that).
 - **Forms without fields:** the **Text**, **Date**, **✓**, and **✗** tools place text anywhere on the page.
+- **Fonts:** placed text can use any installed font, with bold and italic (Ctrl+B / Ctrl+I). The list shows common fonts first, each in its own typeface, and remembers your choice for new text. Fonts are embedded in the saved PDF. The screen shows text exactly as it will be saved: no kerning, ligatures or script-font swashes, which PDFs don't apply.
 - **Signatures:** click **✍ Sign** to draw a signature or import a scanned/photographed one. The app can turn a white paper background transparent. Saved signatures are stored in `%LOCALAPPDATA%\PdfEditor\Signatures` and reused next time. They are encrypted with Windows DPAPI, so only your Windows account on this PC can read them. Signatures saved as plain PNG files by older versions are encrypted automatically the next time you open the signature list.
   - Drag to move. The corner handle resizes. The round top handle rotates the signature to any angle; hold Shift to snap to 15° steps.
   - **⟲ 90° / ⟳ 90°** (Ctrl+Shift+R / Ctrl+R) rotate the signature for vertical signature lines. You can also type an exact angle.

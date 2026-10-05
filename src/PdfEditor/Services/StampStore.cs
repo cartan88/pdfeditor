@@ -27,8 +27,9 @@ public static class StampStore
 
     // ------------------------------------------------------------------ JSON shapes
 
+    // Bold and Italic were added after version 1 shipped; files without them read as false.
     private sealed record ItemData(string Kind, double Cx, double Cy, double W, double H, double Angle,
-        string Text, double FontSize, string Color, string Font, int Image);
+        string Text, double FontSize, string Color, string Font, int Image, bool Bold = false, bool Italic = false);
 
     /// <summary>An image used by items on the page: its SHA-256, and whether a copy of the bytes is stored (PNG) or the
     /// drawn XObject already holds them (JPEG, embedded unchanged).</summary>
@@ -91,7 +92,7 @@ public static class StampStore
             }
             var c = s.Color;
             items.Add(new ItemData(s.Kind.ToString(), s.CenterX, s.CenterY, s.Width, s.Height, s.Angle, s.Text, s.FontSize,
-                $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}", s.FontFamily, image));
+                $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}", s.FontFamily, image, s.Bold, s.Italic));
         }
 
         var crop = geometry.CropBox;
@@ -185,7 +186,7 @@ public static class StampStore
                 {
                     Kind = kind, PageIndex = geometry.Index,
                     ImageData = d.Image >= 0 && d.Image < imageBytes.Count ? imageBytes[d.Image] : null,
-                    Text = d.Text ?? "", FontSize = d.FontSize, FontFamily = d.Font ?? "Arial",
+                    Text = d.Text ?? "", FontSize = d.FontSize, FontFamily = d.Font ?? "Arial", Bold = d.Bold, Italic = d.Italic,
                     Color = (Color)ColorConverter.ConvertFromString(d.Color),
                 };
                 if (kind == StampKind.Image && m.ImageData == null) return null;

@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     private enum Tool { Select, Text, Date, Check, Cross, Whiteout, PlaceImage }
 
     private record StampState(StampKind Kind, int Page, double Cx, double Cy, double W, double H, double Angle,
-        string Text, double FontSize, Color Color, string Font, byte[]? Data);
+        string Text, double FontSize, Color Color, string Font, bool Bold, bool Italic, byte[]? Data);
 
     /// <summary>Everything undo covers: placed items, and form field values in <see cref="_fields"/> order.</summary>
     private sealed record EditorState(List<StampState> Stamps, string[] Fields)
@@ -63,6 +63,9 @@ public partial class MainWindow : Window
     private StampView? _selected;
     private double _textFontSize = 12;
     private Color _textColor = Colors.Black;
+    // Font for new text; remembered between sessions in UserSettings.
+    private string _textFont = "Arial";
+    private bool _textBold, _textItalic;
     private readonly Stack<EditorState> _undo = new();
     private readonly Stack<EditorState> _redo = new();
     private EditorState? _gestureSnapshot;
@@ -98,6 +101,9 @@ public partial class MainWindow : Window
             item.Content = sp;
             ColorBox.Items.Add(item);
         }
+        var prefs = UserSettings.Load();
+        (_textFont, _textBold, _textItalic) = (prefs.TextFont, prefs.TextBold, prefs.TextItalic);
+        FillFontBox();
         SizeChanged += (s, e) => { if (_fitWidth) FitWidth(); };
         // Leaving a form field ends its typing session, so the next edit starts a new undo step.
         PagesPanel.AddHandler(Keyboard.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((s, e) => _typingField = null), true);
@@ -679,6 +685,9 @@ public partial class MainWindow : Window
         TextProps.Visibility = isText ? Visibility.Visible : Visibility.Collapsed;
         double fs = m?.Kind == StampKind.Text ? m.FontSize : _textFontSize;
         FontSizeBox.Text = Math.Round(fs, 1).ToString(CultureInfo.CurrentCulture);
+        SelectFont(m?.Kind == StampKind.Text ? m.FontFamily : _textFont);
+        BoldButton.IsChecked = m?.Kind == StampKind.Text ? m.Bold : _textBold;
+        ItalicButton.IsChecked = m?.Kind == StampKind.Text ? m.Italic : _textItalic;
         var color = m?.Kind == StampKind.Text ? m.Color : _textColor;
         ColorBox.SelectedItem = ColorBox.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (Color)i.Tag == color);
         _updatingSelectionBar = false;
@@ -690,7 +699,7 @@ public partial class MainWindow : Window
     }
 
     private List<StampState> StampSnapshot() => _stamps.Select(v => v.Model).Select(m =>
-        new StampState(m.Kind, m.PageIndex, m.CenterX, m.CenterY, m.Width, m.Height, m.Angle, m.Text, m.FontSize, m.Color, m.FontFamily, m.ImageData)).ToList();
+        new StampState(m.Kind, m.PageIndex, m.CenterX, m.CenterY, m.Width, m.Height, m.Angle, m.Text, m.FontSize, m.Color, m.FontFamily, m.Bold, m.Italic, m.ImageData)).ToList();
 
     private EditorState Snapshot() => new(StampSnapshot(), _fields.Select(f => f.Value).ToArray());
 
@@ -762,7 +771,7 @@ public partial class MainWindow : Window
                 var m = new StampModel
                 {
                     Kind = s.Kind, PageIndex = s.Page, ImageData = s.Data,
-                    Text = s.Text, FontSize = s.FontSize, Color = s.Color, FontFamily = s.Font,
+                    Text = s.Text, FontSize = s.FontSize, Color = s.Color, FontFamily = s.Font, Bold = s.Bold, Italic = s.Italic,
                 };
                 m.Width = s.W; m.Height = s.H; m.CenterX = s.Cx; m.CenterY = s.Cy; m.Angle = s.Angle;
                 AddStamp(m, select: false);
@@ -812,7 +821,7 @@ public partial class MainWindow : Window
                 var m = new StampModel
                 {
                     Kind = src.Kind, PageIndex = page.Index, ImageData = src.ImageData, Text = src.Text,
-                    FontSize = src.FontSize, Color = src.Color, FontFamily = src.FontFamily,
+                    FontSize = src.FontSize, Color = src.Color, FontFamily = src.FontFamily, Bold = src.Bold, Italic = src.Italic,
                 };
                 m.Width = src.Width; m.Height = src.Height; m.Angle = src.Angle;
                 m.CenterX = Math.Clamp(src.CenterX, 0, page.Geometry.ViewWidth);
@@ -906,6 +915,7 @@ public partial class MainWindow : Window
             {
                 var m = NewText(page.Index, _tool == Tool.Check ? "✓" : "✗", Math.Max(_textFontSize, 14), _textColor);
                 m.FontFamily = "Segoe UI Symbol";
+                m.Bold = m.Italic = false; // marks keep their own symbol font
                 var size = StampView.MeasureText(m);
                 m.Width = size.Width; m.Height = size.Height;
                 m.CenterX = p.X; m.CenterY = p.Y;
@@ -970,9 +980,13 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private static StampModel NewText(int page, string text, double size, Color color)
+    private StampModel NewText(int page, string text, double size, Color color)
     {
-        var m = new StampModel { Kind = StampKind.Text, PageIndex = page, Text = text, FontSize = size, Color = color };
+        var m = new StampModel
+        {
+            Kind = StampKind.Text, PageIndex = page, Text = text, FontSize = size, Color = color,
+            FontFamily = _textFont, Bold = _textBold, Italic = _textItalic,
+        };
         var s = StampView.MeasureText(m);
         m.Width = s.Width;
         m.Height = s.Height;
@@ -1113,7 +1127,8 @@ public partial class MainWindow : Window
             "  • ⟲ / ⟳ rotate by 90° – handy for signature lines printed vertically. You can also type an exact angle.\n" +
             "  • Yellow signature fields: click them to drop your signature right in the box.\n\n" +
             "Other\n" +
-            "  • Double-click placed text to edit it. Del deletes, arrows nudge (Shift = 10×).\n" +
+            "  • Double-click placed text to edit it. Choose its font, size and colour in the toolbar; Ctrl+B / Ctrl+I for bold and italic.\n" +
+            "  • Del deletes, arrows nudge (Shift = 10×).\n" +
             "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo form entries and placed items (inside a field, Ctrl+Z undoes typing there).\n" +
@@ -1181,6 +1196,74 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter) { ApplyFontSize(FontSizeBox.Text); e.Handled = true; }
     }
 
+    /// <summary>Fonts listed first, when installed; the rest of the installed fonts follow alphabetically.</summary>
+    private static readonly string[] CommonFonts =
+        { "Arial", "Calibri", "Cambria", "Georgia", "Segoe UI", "Times New Roman", "Verdana", "Courier New", "Segoe Script", "Segoe Print" };
+
+    private void FillFontBox()
+    {
+        var installed = Fonts.SystemFontFamilies.Select(f => f.Source)
+            .Where(n => !string.IsNullOrWhiteSpace(n) && !n.StartsWith("@"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var common = CommonFonts.Where(c => installed.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
+        foreach (var name in common) FontBox.Items.Add(FontItem(name));
+        if (common.Count > 0) FontBox.Items.Add(new Separator());
+        foreach (var name in installed) FontBox.Items.Add(FontItem(name));
+    }
+
+    /// <summary>A font list entry showing the name in its own typeface (TextSearch lets typing jump by name).</summary>
+    private static ComboBoxItem FontItem(string name)
+    {
+        var item = new ComboBoxItem { Tag = name, Content = new TextBlock { Text = name, FontFamily = new FontFamily(name), FontSize = 13 } };
+        TextSearch.SetText(item, name);
+        return item;
+    }
+
+    private void SelectFont(string name)
+    {
+        var item = FontBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => string.Equals((string)i.Tag, name, StringComparison.OrdinalIgnoreCase));
+        if (item == null)
+        {
+            // A font that isn't installed here (e.g. text placed on another PC): list it so it can still be shown.
+            item = FontItem(name);
+            FontBox.Items.Insert(0, item);
+        }
+        FontBox.SelectedItem = item;
+    }
+
+    private void FontBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingSelectionBar || FontBox.SelectedItem is not ComboBoxItem { Tag: string name }) return;
+        _textFont = name;
+        SaveTextPreferences();
+        if (_selected?.Model is { Kind: StampKind.Text } m && m.FontFamily != name)
+            Mutate(() => m.FontFamily = name);
+    }
+
+    private void Bold_Click(object sender, RoutedEventArgs e) => SetBold(BoldButton.IsChecked == true);
+    private void Italic_Click(object sender, RoutedEventArgs e) => SetItalic(ItalicButton.IsChecked == true);
+
+    private void SetBold(bool bold)
+    {
+        _textBold = bold;
+        SaveTextPreferences();
+        if (_selected?.Model is { Kind: StampKind.Text } m && m.Bold != bold) Mutate(() => m.Bold = bold);
+        UpdateSelectionBar();
+    }
+
+    private void SetItalic(bool italic)
+    {
+        _textItalic = italic;
+        SaveTextPreferences();
+        if (_selected?.Model is { Kind: StampKind.Text } m && m.Italic != italic) Mutate(() => m.Italic = italic);
+        UpdateSelectionBar();
+    }
+
+    private void SaveTextPreferences() =>
+        (UserSettings.Load() with { TextFont = _textFont, TextBold = _textBold, TextItalic = _textItalic }).Save();
+
     private void ColorBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingSelectionBar || ColorBox.SelectedItem is not ComboBoxItem { Tag: Color c }) return;
@@ -1207,6 +1290,15 @@ public partial class MainWindow : Window
                 case Key.OemMinus or Key.Subtract: StepZoom(-1); e.Handled = true; return;
                 case Key.D0 or Key.NumPad0: FitWidth(); e.Handled = true; return;
                 case Key.D1 or Key.NumPad1: _fitWidth = false; SetZoom(1); e.Handled = true; return;
+            }
+            // Ctrl+B / Ctrl+I: the selected text (even while editing it), or the style for new text.
+            bool textTarget = _selected?.Model.Kind == StampKind.Text ? (_selected.IsEditing || !IsTyping()) : (_selected == null && !IsTyping());
+            if (textTarget && key is Key.B or Key.I)
+            {
+                bool current = key == Key.B ? (_selected?.Model.Bold ?? _textBold) : (_selected?.Model.Italic ?? _textItalic);
+                if (key == Key.B) SetBold(!current); else SetItalic(!current);
+                e.Handled = true;
+                return;
             }
             if (!IsTyping())
             {

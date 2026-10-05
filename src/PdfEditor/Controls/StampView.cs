@@ -44,6 +44,12 @@ public sealed class StampView : Grid
         RenderTransform = _rotate;
         RenderTransformOrigin = new Point(0.5, 0.5);
         Background = Brushes.Transparent; // hit-testable everywhere
+        // Saved text is written glyph by glyph with no kerning, ligatures or contextual alternates (script fonts use
+        // these heavily), so show it the same way on screen (inherited by the text block and the editor).
+        System.Windows.Documents.Typography.SetKerning(this, false);
+        System.Windows.Documents.Typography.SetStandardLigatures(this, false);
+        System.Windows.Documents.Typography.SetContextualLigatures(this, false);
+        System.Windows.Documents.Typography.SetContextualAlternates(this, false);
 
         switch (model.Kind)
         {
@@ -133,7 +139,7 @@ public sealed class StampView : Grid
     private void OnModelChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (Model.Kind == StampKind.Text && e.PropertyName is nameof(StampModel.Text) or nameof(StampModel.FontSize)
-                or nameof(StampModel.FontFamily) or nameof(StampModel.Color))
+                or nameof(StampModel.FontFamily) or nameof(StampModel.Bold) or nameof(StampModel.Italic) or nameof(StampModel.Color))
         {
             ApplyTextStyle();
             if (e.PropertyName != nameof(StampModel.Color)) ResizeToText();
@@ -155,30 +161,56 @@ public sealed class StampView : Grid
     {
         if (_textBlock == null) return;
         var family = new FontFamily(FontPicker.PickFor(Model.Text, Model.FontFamily));
+        var weight = Model.Bold ? FontWeights.Bold : FontWeights.Normal;
+        var style = Model.Italic ? FontStyles.Italic : FontStyles.Normal;
         _textBlock.Text = Model.Text;
         _textBlock.FontFamily = family;
+        _textBlock.FontWeight = weight;
+        _textBlock.FontStyle = style;
         _textBlock.FontSize = Model.FontSize;
         _textBlock.LineHeight = Model.FontSize * PdfSaver.LineSpacing;
         _textBlock.Foreground = new SolidColorBrush(Model.Color);
         if (_editor != null)
         {
             _editor.FontFamily = family;
+            _editor.FontWeight = weight;
+            _editor.FontStyle = style;
             _editor.FontSize = Model.FontSize;
             _editor.Foreground = _textBlock.Foreground;
         }
     }
 
+    /// <summary>The typeface a text stamp is drawn with (also used by PdfSaver's font choice).</summary>
+    public static Typeface TypefaceFor(StampModel m) =>
+        new(new FontFamily(FontPicker.PickFor(m.Text, m.FontFamily)), m.Italic ? FontStyles.Italic : FontStyles.Normal,
+            m.Bold ? FontWeights.Bold : FontWeights.Normal, FontStretches.Normal);
+
     public static Size MeasureText(StampModel m)
     {
-        var family = FontPicker.PickFor(m.Text, m.FontFamily);
-        var typeface = new Typeface(family);
+        var typeface = TypefaceFor(m);
         var lines = m.Text.Replace("\r\n", "\n").Split('\n');
         double w = 0;
+        // Widths from the font's advance widths, without kerning: exactly what the saved file uses.
+        bool glyphs = typeface.TryGetGlyphTypeface(out var gt);
         foreach (var line in lines)
         {
-            var ft = new FormattedText(line.Length == 0 ? " " : line, CultureInfo.CurrentUICulture,
-                FlowDirection.LeftToRight, typeface, m.FontSize, Brushes.Black, 1.0);
-            w = Math.Max(w, ft.WidthIncludingTrailingWhitespace);
+            string t = line.Length == 0 ? " " : line;
+            if (glyphs)
+            {
+                double em = 0;
+                for (int i = 0; i < t.Length; i++)
+                {
+                    int cp = char.ConvertToUtf32(t, i);
+                    if (char.IsSurrogatePair(t, i)) i++;
+                    em += gt.CharacterToGlyphMap.TryGetValue(cp, out var g) ? gt.AdvanceWidths[g] : 0.5;
+                }
+                w = Math.Max(w, em * m.FontSize);
+            }
+            else
+            {
+                var ft = new FormattedText(t, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, typeface, m.FontSize, Brushes.Black, 1.0);
+                w = Math.Max(w, ft.WidthIncludingTrailingWhitespace);
+            }
         }
         double pad = 2 * PdfSaver.TextPadding;
         return new Size(Math.Max(w, m.FontSize * 0.6) + pad + 1, lines.Length * m.FontSize * PdfSaver.LineSpacing + pad);
@@ -355,6 +387,8 @@ public sealed class StampView : Grid
             Padding = new Thickness(0),
             Background = new SolidColorBrush(Color.FromArgb(0x30, 0x25, 0x63, 0xEB)),
             FontFamily = _textBlock.FontFamily,
+            FontWeight = _textBlock.FontWeight,
+            FontStyle = _textBlock.FontStyle,
             FontSize = Model.FontSize,
             Foreground = _textBlock.Foreground,
             HorizontalAlignment = HorizontalAlignment.Left,

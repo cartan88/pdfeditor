@@ -84,8 +84,20 @@
                 <TextBlock Text="°" VerticalAlignment="Center" Margin="2,0,6,0" />
                 <Separator />
                 <StackPanel x:Name="TextProps" Orientation="Horizontal">
-                    <TextBlock Text="Size" VerticalAlignment="Center" Margin="4,0,4,0" />
+                    <!-- Common fonts first, then every installed font, each shown in its own typeface. -->
+                    <ComboBox x:Name="FontBox" Width="160" Margin="4,0,6,0" MaxDropDownHeight="440" IsTextSearchEnabled="True"
+                              SelectionChanged="FontBox_SelectionChanged" ToolTip="Font"
+                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ComboBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ComboBox.ItemsPanel>
+                    </ComboBox>
+                    <TextBlock Text="Size" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <ComboBox x:Name="FontSizeBox" Width="58" IsEditable="True" KeyDown="FontSizeBox_KeyDown" SelectionChanged="FontSizeBox_SelectionChanged" />
+                    <ToggleButton x:Name="BoldButton" Content="B" FontWeight="Bold" MinWidth="26" Margin="6,0,0,0" Click="Bold_Click" ToolTip="Bold (Ctrl+B)" />
+                    <ToggleButton x:Name="ItalicButton" Content="I" FontStyle="Italic" FontFamily="Georgia" MinWidth="26" Click="Italic_Click" ToolTip="Italic (Ctrl+I)" />
                     <ComboBox x:Name="ColorBox" Width="84" Margin="6,0,0,0" SelectionChanged="ColorBox_SelectionChanged" />
                     <Separator />
                 </StackPanel>

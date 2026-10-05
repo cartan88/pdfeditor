@@ -34,6 +34,8 @@ internal static class Ui
         {
             try
             {
+                // Preferences written by the app during tests go to a temp file, never the user's real settings.
+                PdfEditor.Services.UserSettings.FilePath = Path.Combine(TestData.TempDir(), "settings.json");
                 dispatcher = Dispatcher.CurrentDispatcher;
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };

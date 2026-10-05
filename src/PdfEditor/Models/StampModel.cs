@@ -18,6 +18,7 @@ public sealed class StampModel : INotifyPropertyChanged
     private string _text = "";
     private Color _color = Colors.Black;
     private string _fontFamily = "Arial";
+    private bool _bold, _italic;
 
     public required StampKind Kind { get; init; }
     public required int PageIndex { get; init; }
@@ -44,6 +45,8 @@ public sealed class StampModel : INotifyPropertyChanged
     public double FontSize { get => _fontSize; set => Set(ref _fontSize, Math.Clamp(value, 4, 144)); }
     public Color Color { get => _color; set => Set(ref _color, value); }
     public string FontFamily { get => _fontFamily; set => Set(ref _fontFamily, value); }
+    public bool Bold { get => _bold; set => Set(ref _bold, value); }
+    public bool Italic { get => _italic; set => Set(ref _italic, value); }
 
     public double AspectRatio => Height > 0 ? Width / Height : 1;
 
