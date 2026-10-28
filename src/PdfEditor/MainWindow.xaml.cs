@@ -84,6 +84,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ConfirmExternalFiles = AskToLoadExternalFiles;
         _renderTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (s, e) =>
         {
             _renderTimer!.Stop();
@@ -156,6 +157,17 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            // Streams whose data lives in an external file: embed it (if allowed) or keep the data in the PDF,
+            // then carry on with an ordinary self-contained copy.
+            string? fileStreamNote = null;
+            if (FileStreams.Find(doc) is { Count: > 0 } external)
+            {
+                fileStreamNote = ResolveFileStreams(external, path);
+                using var normalized = new MemoryStream();
+                doc.Save(normalized, false);
+                bytes = normalized.ToArray();
+                doc = PdfOpen.Open(bytes, password);
+            }
             // Items placed by an earlier save come back as editable objects; the page itself is shown without them.
             var restored = await Task.Run(() => StampStore.Extract(bytes, password));
             if (restored.PagesRestored > 0)
@@ -199,6 +211,8 @@ public partial class MainWindow : Window
             SetStatus(fillable > 0
                 ? $"Opened {Path.GetFileName(path)} – {fillable} fillable field(s). Click a field to type, or use the tools above."
                 : $"Opened {Path.GetFileName(path)} – no fillable fields; use Text, Date, ✓ and Sign to fill it in.");
+            if (fileStreamNote != null)
+                SetStatus(StatusText.Text + " " + fileStreamNote);
             if (restored.Stamps.Count > 0)
                 SetStatus(StatusText.Text + $" {restored.Stamps.Count} item(s) you placed earlier can be moved and edited.");
             if (restored.PagesSkipped > 0)
@@ -215,6 +229,54 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = null;
             UpdateUi();
         }
+    }
+
+    /// <summary>
+    /// Asks whether to load external files a PDF takes content from (only files next to it qualify; see
+    /// <see cref="FileStreams.SafeLocalPath"/>). Replaceable so tests don't show a dialog.
+    /// </summary>
+    internal Func<IReadOnlyList<string>, bool> ConfirmExternalFiles { get; set; }
+
+    private bool AskToLoadExternalFiles(IReadOnlyList<string> files)
+    {
+        var names = string.Join("\n", files.Take(8).Select(f => "  • " + Path.GetFileName(f)))
+                    + (files.Count > 8 ? $"\n  … and {files.Count - 8} more" : "");
+        return MessageBox.Show(this,
+            "This PDF takes some of its content from separate files next to it:\n\n" + names + "\n\n" +
+            "Load them? Their content will be embedded, so the PDF won't need them once you save it.",
+            "PDF Editor", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes) == MessageBoxResult.Yes;
+    }
+
+    /// <summary>Embeds or drops each external file reference; returns a note for the status bar.</summary>
+    private string ResolveFileStreams(List<FileStreams.Reference> external, string pdfPath)
+    {
+        string folder = Path.GetDirectoryName(Path.GetFullPath(pdfPath))!;
+        var resolved = external.Select(r => (Ref: r, Path: FileStreams.SafeLocalPath(r.FileName, folder))).ToList();
+        var files = resolved.Where(x => x.Path != null).Select(x => x.Path!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        bool load = files.Count > 0 && ConfirmExternalFiles(files);
+
+        int loaded = 0, missing = 0;
+        foreach (var (r, file) in resolved)
+        {
+            if (load && file != null)
+            {
+                try
+                {
+                    FileStreams.Embed(r, File.ReadAllBytes(file));
+                    loaded++;
+                    continue;
+                }
+                catch (Exception)
+                {
+                    // unreadable: fall back to the data in the PDF
+                }
+            }
+            FileStreams.KeepInternal(r);
+            if (r.FileName != null) missing++; // a real file reference whose content wasn't loaded
+        }
+        if (missing == 0) return loaded > 0 ? $"Embedded content from {loaded} external file(s)." : "";
+        return $"{missing} part(s) of this PDF refer to external files that weren't loaded"
+               + (load ? " (not found next to the PDF)" : "") + "; that content may be missing.";
     }
 
     private void CloseDocument()

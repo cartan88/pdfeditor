@@ -52,7 +52,7 @@ public class TextStyleTests
         var stamps = StyledStamps();
         var saved = PdfOpen.Open(PdfSaver.Build(TextPages(1), null, new List<FormFieldModel>(), stamps, flatten: false), null);
         var fonts = saved.Pages[0].Resources.Elements.GetDictionary("/Font")!.Elements.Values
-            .Select(v => ((PdfDictionary)((PdfSharp.Pdf.Advanced.PdfReference)v).Value).Elements.GetName("/BaseFont"))
+            .Select(v => ((PdfDictionary)((PdfSharp.Pdf.Advanced.PdfReference)v!).Value).Elements.GetName("/BaseFont"))
             .ToList();
         // One embedded font per font/style combination (PDFsharp may simulate a style a font doesn't have).
         Assert.True(fonts.Count >= stamps.Select(s => (s.FontFamily, s.Bold, s.Italic)).Distinct().Count() / 2,

@@ -20,6 +20,7 @@ You can also drag a PDF onto the exe or the window, or use it with *Open with…
 - **Print** (Ctrl+P) prints everything you filled in, exactly as a flattened copy would look. You can choose a page range, the current page, or the number of copies. Oversized pages are shrunk to fit, and landscape pages are rotated to fit the paper.
 - **Save** keeps the form fields editable. Text, signatures, images and white-out you placed can also still be moved and edited when you reopen the file in PDF Editor. Other viewers show them as normal page content. If another program changes a page, the items on that page become permanent. **File › Save Flattened Copy** turns everything into permanent page content.
 - Opens password-protected PDFs and permission-restricted PDFs.
+- Opens PDFs with "file streams", where content is kept in separate files. If those files are next to the PDF (in the same folder or a subfolder), the app asks before loading them and then embeds their content, so the saved PDF is self-contained. For safety, files anywhere else on the PC are never read. If the content isn't loaded, the data stored in the PDF itself is used.
 
 ## Build from source
 ```
