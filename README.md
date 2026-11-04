@@ -28,10 +28,12 @@ cd src\PdfEditor
 dotnet build
 dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ..\..\publish
 ```
-For coworkers who don't have .NET installed, build the standalone version. This is how `PdfEditor-Windows-x64.zip` was made:
+For coworkers who don't have .NET installed, build the standalone version and zip the folder. This is how `PdfEditor-Windows-x64.zip` is made:
 ```
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o ..\..\publish-standalone
+Compress-Archive -Path ..\..\publish-standalone\* -DestinationPath ..\..\PdfEditor-Windows-x64.zip -Force
 ```
+Publishing puts `READ ME.txt` (from `src\PdfEditor\Distribution`) and `samples\sample-form.pdf` next to the exe, so the zip contains everything. To change what coworkers read, edit `src\PdfEditor\Distribution\READ ME.txt`.
 
 ## Tests
 ```

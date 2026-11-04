@@ -1,0 +1,42 @@
+PDF Editor - fill in PDF forms and sign them
+============================================
+
+Getting started
+---------------
+1. Unzip this folder anywhere (e.g. Desktop or Documents).
+2. Double-click PdfEditor.exe. No installation needed.
+   If Windows shows "Windows protected your PC", click "More info" > "Run anyway"
+   (the app is not code-signed).
+3. Open a PDF (or drag one onto the window). Try sample-form.pdf to practise.
+
+Filling in forms
+----------------
+- Fillable fields are highlighted in blue: click and type. Tab moves to the next field.
+- Forms without fields: use the Text, Date, check-mark and cross tools and click
+  where the text should go. Placed text can use a different font, bold and italic.
+- White-out covers existing content with a white box.
+
+Signing
+-------
+- Click Sign, then draw your signature or import a scanned one. It is remembered
+  for next time (stored encrypted, readable only by your Windows account).
+- Click on the page to place it. Drag to move, corner handle to resize,
+  round top handle (or the 90-degree buttons) to rotate - handy for vertical
+  signature lines.
+- "All pages" copies the selected item (e.g. your initials) onto every page.
+
+Saving and printing
+-------------------
+- Save keeps the form editable. File > Save Flattened Copy makes everything permanent.
+- Text and signatures you placed stay movable and editable when you reopen the file.
+- Print with Ctrl+P.
+
+Password-protected PDFs
+-----------------------
+- Enter the password the file was sent with. Saved copies keep the same password.
+- If the author doesn't allow changes, choose "Open read-only" to view it (and print
+  it, if the author allows printing), or enter the owner password to edit it.
+
+Help > How to use lists all shortcuts. Ctrl+Z / Ctrl+Y undo and redo.
+
+Requires Windows 10 (1809 or later) or Windows 11, 64-bit.

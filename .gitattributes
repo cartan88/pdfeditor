@@ -1,0 +1,2 @@
+# Shipped in the download zip and opened in Notepad: keep Windows line endings exactly as stored.
+src/PdfEditor/Distribution/*.txt -text

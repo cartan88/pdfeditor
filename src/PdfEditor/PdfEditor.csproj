@@ -29,4 +29,10 @@
     <InternalsVisibleTo Include="PdfEditor.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Placed next to the exe by dotnet publish (not bundled into the single file), so the download zip is just the publish folder. -->
+    <None Include="Distribution\READ ME.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="READ ME.txt" />
+    <None Include="..\..\samples\sample-form.pdf" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="sample-form.pdf" />
+  </ItemGroup>
+
 </Project>
