@@ -12,24 +12,24 @@ public static class PdfOpen
     /// Opens a PDF for editing. Files with "file streams" (an /F entry on a stream), which PDFsharp can't read, are
     /// opened with that entry renamed; see <see cref="FileStreams"/> for resolving them afterwards.
     /// </summary>
-    public static PdfDocument Open(byte[] bytes, string? password)
+    public static PdfDocument Open(byte[] bytes, string? password, PdfDocumentOpenMode mode = PdfDocumentOpenMode.Modify)
     {
         try
         {
-            return OpenRaw(bytes, password);
+            return OpenRaw(bytes, password, mode);
         }
         catch (NotImplementedException) when (FileStreams.Neutralize(bytes) is { } patched)
         {
-            return OpenRaw(patched, password);
+            return OpenRaw(patched, password, mode);
         }
     }
 
-    private static PdfDocument OpenRaw(byte[] bytes, string? password)
+    private static PdfDocument OpenRaw(byte[] bytes, string? password, PdfDocumentOpenMode mode)
     {
         var stream = new MemoryStream(bytes, writable: false);
         return password == null
-            ? PdfReader.Open(stream, PdfDocumentOpenMode.Modify)
-            : PdfReader.Open(stream, password, PdfDocumentOpenMode.Modify);
+            ? PdfReader.Open(stream, mode)
+            : PdfReader.Open(stream, password, mode);
     }
 
     public static List<PageGeometry> ReadGeometry(PdfDocument doc)

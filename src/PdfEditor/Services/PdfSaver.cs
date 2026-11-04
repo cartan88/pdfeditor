@@ -21,9 +21,10 @@ public static class PdfSaver
         typeof(XForm).GetProperty("PdfForm", BindingFlags.Instance | BindingFlags.NonPublic);
 
     public static void Save(byte[] original, string? password, IReadOnlyList<FormFieldModel> fields,
-        IReadOnlyList<StampModel> stamps, bool flatten, string outputPath)
+        IReadOnlyList<StampModel> stamps, bool flatten, string outputPath, PdfProtection? protection = null)
     {
         var bytes = Build(original, password, fields, stamps, flatten);
+        if (protection != null) bytes = PdfSecurity.Protect(bytes, protection); // keep the original's password and restrictions
         var dir = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
         var temp = Path.Combine(dir, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
         try

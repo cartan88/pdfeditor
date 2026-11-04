@@ -39,7 +39,7 @@ public partial class MainWindow : Window
     // Document state
     private string? _path;
     private byte[]? _bytes;
-    private string? _password;
+    private PdfProtection? _protection;
     private PdfRenderer? _renderer;
     private readonly List<PageView> _pages = new();
     private List<FormFieldModel> _fields = new();
@@ -85,6 +85,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         ConfirmExternalFiles = AskToLoadExternalFiles;
+        AskPassword = ShowPasswordDialog;
         _renderTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (s, e) =>
         {
             _renderTimer!.Stop();
@@ -130,28 +131,47 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Encrypted files are decrypted into a plain working copy; the protection is re-applied when saving.
         string? password = null;
-        PdfSharp.Pdf.PdfDocument? doc = null;
-        while (doc == null)
+        PdfProtection? protection;
+        while (true)
         {
             try
             {
-                doc = PdfOpen.Open(bytes, password);
+                var source = bytes;
+                var entered = password;
+                (bytes, protection) = await Task.Run(() => PdfSecurity.Unlock(source, entered));
+                break;
             }
-            catch (Exception ex) when (ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase))
+            catch (PdfUnlockException ex)
             {
-                string msg = password == null
-                    ? $"\"{Path.GetFileName(path)}\" is protected. Enter the document password:"
-                    : "That password did not work. Note: editing a restricted PDF requires its owner (permissions) password.";
-                var dlg = new PasswordDialog(msg) { Owner = this };
-                if (dlg.ShowDialog() != true) return;
-                password = dlg.Password;
+                string name = Path.GetFileName(path);
+                string msg = ex.Reason switch
+                {
+                    UnlockFailure.PasswordRequired => $"\"{name}\" is password protected. Enter the password to open it:",
+                    UnlockFailure.WrongPassword => "That password is not correct. Please try again (passwords are case-sensitive):",
+                    _ => password == null
+                        ? $"The author of \"{name}\" has not allowed it to be changed or filled in. To edit it, enter its owner (permissions) password:"
+                        : "That password opens the document, but its author has not allowed changes. To edit it, enter its owner (permissions) password:",
+                };
+                if (AskPassword(msg) is not { } typed) return;
+                password = typed;
             }
             catch (Exception ex)
             {
                 ShowError("This file could not be opened as a PDF.", ex);
                 return;
             }
+        }
+        PdfSharp.Pdf.PdfDocument doc;
+        try
+        {
+            doc = PdfOpen.Open(bytes, null);
+        }
+        catch (Exception ex)
+        {
+            ShowError("This file could not be opened as a PDF.", ex);
+            return;
         }
 
         try
@@ -166,23 +186,23 @@ public partial class MainWindow : Window
                 using var normalized = new MemoryStream();
                 doc.Save(normalized, false);
                 bytes = normalized.ToArray();
-                doc = PdfOpen.Open(bytes, password);
+                doc = PdfOpen.Open(bytes, null);
             }
             // Items placed by an earlier save come back as editable objects; the page itself is shown without them.
-            var restored = await Task.Run(() => StampStore.Extract(bytes, password));
+            var restored = await Task.Run(() => StampStore.Extract(bytes, null));
             if (restored.PagesRestored > 0)
             {
                 bytes = restored.Bytes;
-                doc = PdfOpen.Open(bytes, password);
+                doc = PdfOpen.Open(bytes, null);
             }
             var geometry = PdfOpen.ReadGeometry(doc);
             var fields = FormReader.Read(doc).Select(b => b.Model).ToList();
-            var renderer = await PdfRenderer.LoadAsync(bytes, password);
+            var renderer = await PdfRenderer.LoadAsync(bytes, null);
 
             CloseDocument();
             _path = path;
             _bytes = bytes;
-            _password = password;
+            _protection = protection;
             _renderer = renderer;
             _fields = fields;
             _fieldIndex = new Dictionary<FormFieldModel, int>(ReferenceEqualityComparer.Instance);
@@ -219,6 +239,10 @@ public partial class MainWindow : Window
                 SetStatus(StatusText.Text + $" Items on {restored.PagesSkipped} page(s) were changed in another program and are now part of the page.");
             if (_fields.Any(f => f.IsSigned))
                 SetStatus(StatusText.Text + " Note: this PDF is digitally signed; saving changes will invalidate that signature.");
+            if (protection?.OpenPasswordChanged == true)
+                SetStatus(StatusText.Text + " Saved copies will open with the owner password you entered.");
+            else if (protection is { UserPassword.Length: > 0 })
+                SetStatus(StatusText.Text + " Saved copies keep the same password.");
         }
         catch (Exception ex)
         {
@@ -229,6 +253,16 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = null;
             UpdateUi();
         }
+    }
+
+    /// <summary>Asks for a document password; null means cancelled. Replaceable so tests don't show a dialog.</summary>
+    internal Func<string, string?> AskPassword { get; set; }
+
+    private string? ShowPasswordDialog(string message)
+    {
+        Mouse.OverrideCursor = null;
+        var dlg = new PasswordDialog(message) { Owner = this };
+        return dlg.ShowDialog() == true ? dlg.Password : null;
     }
 
     /// <summary>
@@ -322,13 +356,13 @@ public partial class MainWindow : Window
         var stamps = _stamps.Select(v => v.Model).ToList();
         var fields = _fields;
         var bytes = _bytes;
-        var password = _password;
+        var protection = _protection;
         try
         {
             _busy = true;
             Mouse.OverrideCursor = Cursors.Wait;
             SetStatus("Saving…");
-            await Task.Run(() => PdfSaver.Save(bytes, password, fields, stamps, flatten, path));
+            await Task.Run(() => PdfSaver.Save(bytes, null, fields, stamps, flatten, path, protection));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -421,7 +455,6 @@ public partial class MainWindow : Window
         var stamps = _stamps.Select(v => v.Model).ToList();
         var fields = _fields;
         var bytes = _bytes;
-        var password = _password;
         var geometry = _pages.Select(p => p.Geometry).ToList();
         try
         {
@@ -429,8 +462,8 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             SetStatus("Preparing to print…");
             // Print exactly what a flattened save would contain, so form values and placed items look final.
-            var printable = await Task.Run(() => PdfSaver.Build(bytes, password, fields, stamps, flatten: true));
-            await PdfPrinter.PrintAsync(printable, password, geometry, pages, dlg,
+            var printable = await Task.Run(() => PdfSaver.Build(bytes, null, fields, stamps, flatten: true));
+            await PdfPrinter.PrintAsync(printable, null, geometry, pages, dlg,
                 Path.GetFileName(_path) ?? "PDF Editor document",
                 (i, n) => SetStatus($"Printing page {i} of {n}…"));
             SetStatus($"Sent {pages.Count} page(s) to {dlg.PrintQueue.FullName}.");
