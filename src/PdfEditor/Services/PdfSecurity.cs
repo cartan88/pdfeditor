@@ -19,6 +19,12 @@ public sealed record PdfProtection(string UserPassword, string OwnerPassword, in
     /// so saved copies open with the owner password instead.
     /// </summary>
     public bool OpenPasswordChanged { get; init; }
+
+    /// <summary>The author doesn't allow changes and the user chose to open the document for viewing only.</summary>
+    public bool ViewOnly { get; init; }
+
+    /// <summary>Whether printing is allowed for the access the user has.</summary>
+    public bool CanPrint => !OwnerPasswordReplaced || (Permissions & (1 << 2)) != 0;
 }
 
 public enum UnlockFailure { PasswordRequired, WrongPassword, EditingNotAllowed }
@@ -47,8 +53,10 @@ public static class PdfSecurity
     /// <summary>
     /// Returns plain (unencrypted) bytes to work on, and the protection to re-apply on save (null if the file
     /// wasn't encrypted). Throws <see cref="PdfUnlockException"/> when a password is needed or editing is not allowed.
+    /// With <paramref name="viewOnly"/>, a document whose author forbids changes is opened anyway, marked
+    /// <see cref="PdfProtection.ViewOnly"/>; the caller must then not offer saving or editing.
     /// </summary>
-    public static (byte[] Bytes, PdfProtection? Protection) Unlock(byte[] bytes, string? password)
+    public static (byte[] Bytes, PdfProtection? Protection) Unlock(byte[] bytes, string? password, bool viewOnly = false)
     {
         // PDFsharp ignores an /Encrypt dictionary written directly into the trailer and returns undecrypted data.
         bytes = InlineEncryption.MakeIndirect(bytes) ?? bytes;
@@ -78,9 +86,11 @@ public static class PdfSecurity
         var handler = doc.SecurityHandler;
         if (!handler.Elements.ContainsKey("/Filter")) return (bytes, null); // not encrypted
 
-        int permissions = handler.Elements.GetInteger("/P");
-        bool aes256 = handler.Elements.GetInteger("/V") >= 5;
-        if (!ownerAccess && (permissions & (PermModify | PermAnnotate | PermFillForms)) == 0)
+        // Some producers write /P as an unsigned 32-bit number (e.g. 4294963412 for -3884); only the bits matter.
+        int permissions = unchecked((int)(uint)(long)(PdfObjects.GetNumber(handler.Elements["/P"]) ?? -1));
+        bool aes256 = (PdfObjects.GetNumber(handler.Elements["/V"]) ?? 0) >= 5;
+        bool editable = ownerAccess || (permissions & (PermModify | PermAnnotate | PermFillForms)) != 0;
+        if (!editable && !viewOnly)
             throw new PdfUnlockException(UnlockFailure.EditingNotAllowed,
                 "The author of this PDF does not allow it to be changed or filled in. Enter its owner (permissions) password to edit it.");
 
@@ -99,6 +109,7 @@ public static class PdfSecurity
         {
             OwnerPasswordReplaced = !ownerAccess,
             OpenPasswordChanged = openPasswordChanged,
+            ViewOnly = !editable,
         };
         return (Decrypt(doc), protection);
     }

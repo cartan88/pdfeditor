@@ -40,6 +40,9 @@ public partial class MainWindow : Window
     private string? _path;
     private byte[]? _bytes;
     private PdfProtection? _protection;
+    /// <summary>Opened for viewing only: its author forbids changes and the user didn't have the owner password.</summary>
+    private bool _readOnly;
+    private bool _canPrint = true;
     private PdfRenderer? _renderer;
     private readonly List<PageView> _pages = new();
     private List<FormFieldModel> _fields = new();
@@ -133,6 +136,8 @@ public partial class MainWindow : Window
 
         // Encrypted files are decrypted into a plain working copy; the protection is re-applied when saving.
         string? password = null;
+        string? viewPassword = null; // the password that opens the file, once we know only viewing is allowed with it
+        bool viewOnly = false;
         PdfProtection? protection;
         while (true)
         {
@@ -140,22 +145,31 @@ public partial class MainWindow : Window
             {
                 var source = bytes;
                 var entered = password;
-                (bytes, protection) = await Task.Run(() => PdfSecurity.Unlock(source, entered));
+                var asViewer = viewOnly;
+                (bytes, protection) = await Task.Run(() => PdfSecurity.Unlock(source, entered, asViewer));
                 break;
             }
             catch (PdfUnlockException ex)
             {
                 string name = Path.GetFileName(path);
+                if (ex.Reason == UnlockFailure.EditingNotAllowed) viewPassword = password ?? "";
+                bool canView = viewPassword != null;
                 string msg = ex.Reason switch
                 {
                     UnlockFailure.PasswordRequired => $"\"{name}\" is password protected. Enter the password to open it:",
+                    UnlockFailure.WrongPassword when canView =>
+                        "That is not the owner password. Try again, or open the document read-only:",
                     UnlockFailure.WrongPassword => "That password is not correct. Please try again (passwords are case-sensitive):",
-                    _ => password == null
-                        ? $"The author of \"{name}\" has not allowed it to be changed or filled in. To edit it, enter its owner (permissions) password:"
-                        : "That password opens the document, but its author has not allowed changes. To edit it, enter its owner (permissions) password:",
+                    _ => $"The author of \"{name}\" allows it to be viewed but not changed or filled in.\n\n" +
+                         "Choose Open read-only to view it, or enter its owner (permissions) password to edit it:",
                 };
-                if (AskPassword(msg) is not { } typed) return;
-                password = typed;
+                if (AskPassword(msg, canView) is not { } reply) return;
+                if (reply.ReadOnly)
+                {
+                    viewOnly = true;
+                    password = viewPassword == "" ? null : viewPassword;
+                }
+                else password = reply.Password;
             }
             catch (Exception ex)
             {
@@ -189,7 +203,12 @@ public partial class MainWindow : Window
                 doc = PdfOpen.Open(bytes, null);
             }
             // Items placed by an earlier save come back as editable objects; the page itself is shown without them.
-            var restored = await Task.Run(() => StampStore.Extract(bytes, null));
+            // Read-only documents are shown exactly as they are.
+            bool readOnly = protection?.ViewOnly == true;
+            var unchanged = bytes;
+            var restored = readOnly
+                ? new StampStore.Result(unchanged, new List<StampModel>(), 0, 0)
+                : await Task.Run(() => StampStore.Extract(unchanged, null));
             if (restored.PagesRestored > 0)
             {
                 bytes = restored.Bytes;
@@ -203,6 +222,8 @@ public partial class MainWindow : Window
             _path = path;
             _bytes = bytes;
             _protection = protection;
+            _readOnly = readOnly;
+            _canPrint = protection?.CanPrint ?? true;
             _renderer = renderer;
             _fields = fields;
             _fieldIndex = new Dictionary<FormFieldModel, int>(ReferenceEqualityComparer.Instance);
@@ -243,6 +264,9 @@ public partial class MainWindow : Window
                 SetStatus(StatusText.Text + " Saved copies will open with the owner password you entered.");
             else if (protection is { UserPassword.Length: > 0 })
                 SetStatus(StatusText.Text + " Saved copies keep the same password.");
+            if (_readOnly)
+                SetStatus($"Opened {Path.GetFileName(path)} read-only – its author doesn't allow changes. " +
+                          (_canPrint ? "You can view and print it." : "You can view it; printing isn't allowed either."));
         }
         catch (Exception ex)
         {
@@ -255,14 +279,19 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Asks for a document password; null means cancelled. Replaceable so tests don't show a dialog.</summary>
-    internal Func<string, string?> AskPassword { get; set; }
+    internal sealed record PasswordReply(string Password, bool ReadOnly);
 
-    private string? ShowPasswordDialog(string message)
+    /// <summary>
+    /// Asks for a document password (the flag offers "Open read-only"); null means cancelled.
+    /// Replaceable so tests don't show a dialog.
+    /// </summary>
+    internal Func<string, bool, PasswordReply?> AskPassword { get; set; }
+
+    private PasswordReply? ShowPasswordDialog(string message, bool offerReadOnly)
     {
         Mouse.OverrideCursor = null;
-        var dlg = new PasswordDialog(message) { Owner = this };
-        return dlg.ShowDialog() == true ? dlg.Password : null;
+        var dlg = new PasswordDialog(message, offerReadOnly) { Owner = this };
+        return dlg.ShowDialog() == true ? new PasswordReply(dlg.Password, dlg.ReadOnlyChosen) : null;
     }
 
     /// <summary>
@@ -315,6 +344,8 @@ public partial class MainWindow : Window
 
     private void CloseDocument()
     {
+        _readOnly = false;
+        _canPrint = true;
         Select(null);
         SetTool(Tool.Select);
         _renderGeneration++;
@@ -338,6 +369,13 @@ public partial class MainWindow : Window
 
     private void BuildFieldOverlays()
     {
+        if (_readOnly)
+        {
+            // Show the page exactly as stored: no live input controls.
+            foreach (var page in _pages) page.FieldLayer.Children.Clear();
+            FieldInfo.Text = "Read-only";
+            return;
+        }
         var byPage = _fields.SelectMany(f => f.Widgets).GroupBy(w => w.PageIndex).ToDictionary(g => g.Key, g => g.ToList());
         foreach (var page in _pages)
             FieldOverlay.Build(page, byPage.TryGetValue(page.Index, out var list) ? list : new List<WidgetModel>(), OnSignatureFieldClicked);
@@ -350,7 +388,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveAsync(string path, bool flatten)
     {
-        if (_bytes == null || _busy) return false;
+        if (_bytes == null || _busy || _readOnly) return false;
         CommitTextEdits();
         if (!ConfirmBreakSignatures()) return false;
         var stamps = _stamps.Select(v => v.Model).ToList();
@@ -431,7 +469,7 @@ public partial class MainWindow : Window
 
     private async Task PrintAsync()
     {
-        if (_bytes == null || _busy) return;
+        if (_bytes == null || _busy || !_canPrint) return;
         CommitTextEdits();
         int current = CurrentPage()?.Index ?? 0;
         var dlg = new PrintDialog
@@ -933,6 +971,7 @@ public partial class MainWindow : Window
 
     private void SetTool(Tool tool)
     {
+        if (_readOnly) tool = Tool.Select;
         _tool = tool;
         if (tool != Tool.PlaceImage) _pendingImage = null;
         bool placing = tool != Tool.Select;
@@ -1129,9 +1168,10 @@ public partial class MainWindow : Window
     {
         bool hasDoc = _bytes != null;
         EmptyState.Visibility = hasDoc ? Visibility.Collapsed : Visibility.Visible;
-        SaveButton.IsEnabled = SaveMenu.IsEnabled = SaveAsMenu.IsEnabled = SaveFlatMenu.IsEnabled = hasDoc;
-        PrintButton.IsEnabled = PrintMenu.IsEnabled = hasDoc;
-        ToolsBar.IsEnabled = hasDoc;
+        bool editable = hasDoc && !_readOnly;
+        SaveButton.IsEnabled = SaveMenu.IsEnabled = SaveAsMenu.IsEnabled = SaveFlatMenu.IsEnabled = editable;
+        PrintButton.IsEnabled = PrintMenu.IsEnabled = hasDoc && _canPrint;
+        ToolsBar.IsEnabled = editable;
         UndoButton.IsEnabled = _undo.Count > 0;
         RedoButton.IsEnabled = _redo.Count > 0;
         PageCountText.Text = $"/ {_pages.Count}";
@@ -1141,7 +1181,7 @@ public partial class MainWindow : Window
 
     private void UpdateTitle()
     {
-        Title = _bytes == null ? "PDF Editor" : $"{(_dirty ? "● " : "")}{Path.GetFileName(_path)} – PDF Editor";
+        Title = _bytes == null ? "PDF Editor" : $"{(_dirty ? "● " : "")}{Path.GetFileName(_path)}{(_readOnly ? " (read-only)" : "")} – PDF Editor";
     }
 
     private void SetStatus(string text) => StatusText.Text = text;
@@ -1190,14 +1230,14 @@ public partial class MainWindow : Window
 
     private void Signature_Click(object sender, RoutedEventArgs e)
     {
-        if (_bytes == null) return;
+        if (_bytes == null || _readOnly) return;
         var dlg = new SignatureDialog { Owner = this };
         if (dlg.ShowDialog() == true && dlg.SelectedPng != null) BeginPlaceImage(dlg.SelectedPng, signature: true);
     }
 
     private void Image_Click(object sender, RoutedEventArgs e)
     {
-        if (_bytes == null) return;
+        if (_bytes == null || _readOnly) return;
         var ofd = new OpenFileDialog { Title = "Choose an image", Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|All files|*.*" };
         if (ofd.ShowDialog(this) != true) return;
         try
@@ -1458,6 +1498,11 @@ public partial class MainWindow : Window
         if (ext == ".pdf")
         {
             await OpenAsync(file);
+            return;
+        }
+        if (ImageExtensions.Contains(ext) && _bytes != null && _readOnly)
+        {
+            SetStatus("This document is read-only: its author doesn't allow changes.");
             return;
         }
         if (ImageExtensions.Contains(ext) && _bytes != null)

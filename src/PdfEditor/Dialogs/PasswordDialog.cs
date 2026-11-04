@@ -3,12 +3,12 @@ using System.Windows.Controls;
 
 namespace PdfEditor.Dialogs;
 
-/// <summary>Minimal prompt for a document password.</summary>
+/// <summary>Minimal prompt for a document password, optionally offering to open the document read-only.</summary>
 public sealed class PasswordDialog : Window
 {
     private readonly PasswordBox _box = new() { Margin = new Thickness(0, 8, 0, 14), Padding = new Thickness(4) };
 
-    public PasswordDialog(string message)
+    public PasswordDialog(string message, bool offerReadOnly = false)
     {
         Title = "Password required";
         Width = 380;
@@ -22,6 +22,18 @@ public sealed class PasswordDialog : Window
         var cancel = new Button { Content = "Cancel", IsCancel = true, Style = (Style)Application.Current.FindResource("DialogButton") };
         ok.Click += (s, e) => DialogResult = true;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        if (offerReadOnly)
+        {
+            var readOnly = new Button
+            {
+                Content = "Open read-only",
+                Style = (Style)Application.Current.FindResource("DialogButton"),
+                ToolTip = "View (and print, if allowed) without editing – no password needed",
+            };
+            readOnly.Click += (s, e) => { ReadOnlyChosen = true; DialogResult = true; };
+            buttons.Children.Add(readOnly);
+            ok.Content = "Edit";
+        }
         buttons.Children.Add(ok);
         buttons.Children.Add(cancel);
 
@@ -34,4 +46,7 @@ public sealed class PasswordDialog : Window
     }
 
     public string Password => _box.Password;
+
+    /// <summary>The user chose "Open read-only" instead of entering a password.</summary>
+    public bool ReadOnlyChosen { get; private set; }
 }
