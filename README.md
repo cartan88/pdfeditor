@@ -19,7 +19,7 @@ You can also drag a PDF onto the exe or the window, or use it with *Open with…
 - Undo/redo (Ctrl+Z / Ctrl+Y) for form entries and placed items. Typing in one field is undone as a single step. Zoom (Ctrl+mouse wheel, Ctrl+ +/−, Ctrl+0 fits the width), and Del to delete the selected item.
 - **Print** (Ctrl+P) prints everything you filled in, exactly as a flattened copy would look. You can choose a page range, the current page, or the number of copies. Oversized pages are shrunk to fit, and landscape pages are rotated to fit the paper.
 - **Save** keeps the form fields editable. Text, signatures, images and white-out you placed can also still be moved and edited when you reopen the file in PDF Editor. Other viewers show them as normal page content. If another program changes a page, the items on that page become permanent. **File › Save Flattened Copy** turns everything into permanent page content.
-- Opens password-protected PDFs and permission-restricted PDFs.
+- Opens password-protected PDFs and permission-restricted PDFs. Saved copies keep the password and the author's restrictions.
 - Opens PDFs with "file streams", where content is kept in separate files. If those files are next to the PDF (in the same folder or a subfolder), the app asks before loading them and then embeds their content, so the saved PDF is self-contained. For safety, files anywhere else on the PC are never read. If the content isn't loaded, the data stored in the PDF itself is used.
 
 ## Build from source
@@ -37,7 +37,7 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ```
 dotnet test PdfEditor.slnx
 ```
-The tests are in `tests\PdfEditor.Tests` (xUnit, about 100 tests, a few seconds). They cover page geometry, form reading and saving, field text layout (on-screen and saved text compared in pixels), tab order, undo/redo, images and EXIF orientation, page rendering, printing layout, editable placed items after reopening, and the encrypted signature library.
+The tests are in `tests\PdfEditor.Tests` (xUnit, about 110 tests, a few seconds). They cover page geometry, form reading and saving, field text layout (on-screen and saved text compared in pixels), tab order, undo/redo, images and EXIF orientation, page rendering, printing layout, editable placed items after reopening, password-protected PDFs, and the encrypted signature library.
 
 - WPF code runs on one dedicated STA thread (`Infrastructure\Ui.cs`). The app's startup class is never created and no window is shown, so nothing appears on screen while the tests run.
 - Tests only write to temp folders. `samples\sample-form.pdf` is read-only input, and the signature tests never touch your real signature folder.
