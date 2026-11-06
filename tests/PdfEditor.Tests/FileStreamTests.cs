@@ -75,6 +75,45 @@ public class FileStreamTests
         Assert.Contains("File streams", ex.Message);
     }
 
+    /// <summary>
+    /// <see cref="Pdf"/> encrypted with an open password. PDFsharp can only write the stream once /F is renamed,
+    /// so it is renamed back afterwards (same length; dictionary keys aren't encrypted).
+    /// </summary>
+    private static byte[] EncryptedPdf(string streamDictExtras, string inFileData, string password)
+    {
+        var doc = PdfOpen.Open(Pdf(streamDictExtras, inFileData), null);
+        doc.SecuritySettings.UserPassword = password;
+        doc.SecuritySettings.OwnerPassword = "owner-" + password;
+        var text = Encoding.Latin1.GetString(Save(doc));
+        var renamed = System.Text.RegularExpressions.Regex.Matches(text, @"/f(?=[\s(<\[])");
+        Assert.Single(renamed);
+        return Encoding.Latin1.GetBytes(text[..renamed[0].Index] + "/F" + text[(renamed[0].Index + 2)..]);
+    }
+
+    [Fact]
+    public Task EncryptedPdfsWithFileStreamsOpenAfterThePassword() => Ui.Run(async () =>
+    {
+        // Review finding: the file-stream workaround and decryption both rewrite the document; check them together.
+        var dir = TempDir();
+        File.WriteAllText(Path.Combine(dir, "blue.txt"), BlueBox);
+        var pdf = EncryptedPdf("/F (blue.txt)", "", "user123");
+        Assert.Throws<NotImplementedException>(() => PdfSharp.Pdf.IO.PdfReader.Open(new MemoryStream(pdf), "owner-user123",
+            PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify));
+
+        var asked = new List<IReadOnlyList<string>>();
+        var win = new MainWindow
+        {
+            ConfirmExternalFiles = files => { asked.Add(files); return true; },
+            AskPassword = (_, _) => new MainWindow.PasswordReply("user123", false),
+        };
+        await win.OpenAsync(WritePdf(dir, pdf));
+
+        // The file name inside the encrypted PDF was decrypted correctly, and its content embedded.
+        Assert.Equal(Path.Combine(dir, "blue.txt"), Assert.Single(Assert.Single(asked)), ignoreCase: true);
+        Assert.True(await ShowsBlueBox(Bytes(win)!), "external content should be on the page");
+        typeof(MainWindow).GetField("_dirty", F)!.SetValue(win, false);
+    });
+
     [Fact]
     public Task ExternalContentNextToThePdfIsEmbeddedWhenAllowed() => Ui.Run(async () =>
     {

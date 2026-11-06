@@ -20,7 +20,12 @@ public sealed class PasswordDialog : Window
 
         var ok = new Button { Content = "Open", IsDefault = true, Style = (Style)Application.Current.FindResource("DialogButton") };
         var cancel = new Button { Content = "Cancel", IsCancel = true, Style = (Style)Application.Current.FindResource("DialogButton") };
-        ok.Click += (s, e) => DialogResult = true;
+        ok.Click += (s, e) =>
+        {
+            // With nothing typed, Enter means "just let me view it" rather than retrying an empty password.
+            if (offerReadOnly && _box.Password.Length == 0) ReadOnlyChosen = true;
+            DialogResult = true;
+        };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         if (offerReadOnly)
         {

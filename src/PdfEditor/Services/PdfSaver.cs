@@ -23,8 +23,7 @@ public static class PdfSaver
     public static void Save(byte[] original, string? password, IReadOnlyList<FormFieldModel> fields,
         IReadOnlyList<StampModel> stamps, bool flatten, string outputPath, PdfProtection? protection = null)
     {
-        var bytes = Build(original, password, fields, stamps, flatten);
-        if (protection != null) bytes = PdfSecurity.Protect(bytes, protection); // keep the original's password and restrictions
+        var bytes = Build(original, password, fields, stamps, flatten, protection);
         var dir = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
         var temp = Path.Combine(dir, $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
         try
@@ -39,9 +38,12 @@ public static class PdfSaver
         }
     }
 
-    /// <summary>Produces the edited document in memory (used for saving and printing).</summary>
+    /// <summary>
+    /// Produces the edited document in memory (used for saving and printing). With <paramref name="protection"/>,
+    /// the result is encrypted the same way as the original.
+    /// </summary>
     public static byte[] Build(byte[] original, string? password, IReadOnlyList<FormFieldModel> fields,
-        IReadOnlyList<StampModel> stamps, bool flatten)
+        IReadOnlyList<StampModel> stamps, bool flatten, PdfProtection? protection = null)
     {
         var doc = PdfOpen.Open(original, password);
         var geometry = PdfOpen.ReadGeometry(doc);
@@ -84,6 +86,7 @@ public static class PdfSaver
             if (!flatten) StampStore.Record(doc, page, geometry[group.Key], group, before);
         }
 
+        if (protection != null) PdfSecurity.Apply(doc, protection); // keep the original's password and restrictions
         using var ms = new MemoryStream();
         doc.Save(ms, false);
         return ms.ToArray();

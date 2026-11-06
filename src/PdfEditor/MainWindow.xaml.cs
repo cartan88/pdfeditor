@@ -43,6 +43,11 @@ public partial class MainWindow : Window
     /// <summary>Opened for viewing only: its author forbids changes and the user didn't have the owner password.</summary>
     private bool _readOnly;
     private bool _canPrint = true;
+    /// <summary>
+    /// False when the author only allows filling in the form: placed text, signatures, images, white-out and
+    /// flattening change page content, which needs the "modify" permission (or the owner password).
+    /// </summary>
+    private bool _canEditContent = true;
     private PdfRenderer? _renderer;
     private readonly List<PageView> _pages = new();
     private List<FormFieldModel> _fields = new();
@@ -135,18 +140,18 @@ public partial class MainWindow : Window
         }
 
         // Encrypted files are decrypted into a plain working copy; the protection is re-applied when saving.
+        var original = bytes;
         string? password = null;
         string? viewPassword = null; // the password that opens the file, once we know only viewing is allowed with it
         bool viewOnly = false;
-        PdfProtection? protection;
+        UnlockResult unlocked;
         while (true)
         {
             try
             {
-                var source = bytes;
                 var entered = password;
                 var asViewer = viewOnly;
-                (bytes, protection) = await Task.Run(() => PdfSecurity.Unlock(source, entered, asViewer));
+                unlocked = await Task.Run(() => PdfSecurity.Unlock(original, entered, asViewer));
                 break;
             }
             catch (PdfUnlockException ex)
@@ -177,10 +182,26 @@ public partial class MainWindow : Window
                 return;
             }
         }
+        bytes = unlocked.Bytes;
+        var protection = unlocked.Protection;
+
+        // Unlocked with the owner password of an AES-256 file: its separate open password can't be read back.
+        string? hint = null;
+        while (protection is { OpenPasswordChanged: true })
+        {
+            var msg = hint + "This PDF also has a separate password for opening it, which can't be read back from the file. " +
+                      "Enter it to keep it on saved copies, or choose Cancel to have saved copies open with the owner password you entered " +
+                      "(the author's restrictions then apply to anyone opening them, including you).";
+            if (AskPassword(msg, false) is not { } reply) break;
+            var kept = PdfSecurity.WithOpenPassword(original, protection, reply.Password);
+            if (kept != null) protection = kept;
+            else hint = "That is not this PDF's open password.\n\n";
+        }
+
         PdfSharp.Pdf.PdfDocument doc;
         try
         {
-            doc = PdfOpen.Open(bytes, null);
+            doc = unlocked.Document ?? PdfOpen.Open(bytes, null);
         }
         catch (Exception ex)
         {
@@ -203,10 +224,11 @@ public partial class MainWindow : Window
                 doc = PdfOpen.Open(bytes, null);
             }
             // Items placed by an earlier save come back as editable objects; the page itself is shown without them.
-            // Read-only documents are shown exactly as they are.
+            // Documents whose page content may not be changed are shown exactly as they are.
             bool readOnly = protection?.ViewOnly == true;
+            bool canEditContent = protection?.CanModifyContent ?? true;
             var unchanged = bytes;
-            var restored = readOnly
+            var restored = !canEditContent
                 ? new StampStore.Result(unchanged, new List<StampModel>(), 0, 0)
                 : await Task.Run(() => StampStore.Extract(unchanged, null));
             if (restored.PagesRestored > 0)
@@ -223,6 +245,7 @@ public partial class MainWindow : Window
             _bytes = bytes;
             _protection = protection;
             _readOnly = readOnly;
+            _canEditContent = canEditContent;
             _canPrint = protection?.CanPrint ?? true;
             _renderer = renderer;
             _fields = fields;
@@ -261,12 +284,15 @@ public partial class MainWindow : Window
             if (_fields.Any(f => f.IsSigned))
                 SetStatus(StatusText.Text + " Note: this PDF is digitally signed; saving changes will invalidate that signature.");
             if (protection?.OpenPasswordChanged == true)
-                SetStatus(StatusText.Text + " Saved copies will open with the owner password you entered.");
+                SetStatus(StatusText.Text + " Saved copies will open with the owner password you entered, with the author's restrictions.");
             else if (protection is { UserPassword.Length: > 0 })
                 SetStatus(StatusText.Text + " Saved copies keep the same password.");
             if (_readOnly)
                 SetStatus($"Opened {Path.GetFileName(path)} read-only – its author doesn't allow changes. " +
                           (_canPrint ? "You can view and print it." : "You can view it; printing isn't allowed either."));
+            else if (!_canEditContent)
+                SetStatus($"Opened {Path.GetFileName(path)} – its author allows filling in the form only, so adding text, " +
+                          "signatures, images and white-out is turned off.");
         }
         catch (Exception ex)
         {
@@ -346,6 +372,7 @@ public partial class MainWindow : Window
     {
         _readOnly = false;
         _canPrint = true;
+        _canEditContent = true;
         Select(null);
         SetTool(Tool.Select);
         _renderGeneration++;
@@ -386,9 +413,20 @@ public partial class MainWindow : Window
     // Saving
     // =====================================================================================
 
+    private const string ReadOnlyMessage = "This document is read-only: its author doesn't allow changes.";
+    private const string FormsOnlyMessage = "Its author allows filling in the form only, so page content can't be changed.";
+
+    /// <summary>Whether this kind of save is allowed; tells the user why not.</summary>
+    private bool CanSave(bool flatten)
+    {
+        if (_readOnly) { SetStatus(ReadOnlyMessage); return false; }
+        if (flatten && !_canEditContent) { SetStatus("A flattened copy can't be saved. " + FormsOnlyMessage); return false; }
+        return true;
+    }
+
     private async Task<bool> SaveAsync(string path, bool flatten)
     {
-        if (_bytes == null || _busy || _readOnly) return false;
+        if (_bytes == null || _busy || !CanSave(flatten)) return false;
         CommitTextEdits();
         if (!ConfirmBreakSignatures()) return false;
         var stamps = _stamps.Select(v => v.Model).ToList();
@@ -449,7 +487,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveAsAsync(bool flatten)
     {
-        if (_bytes == null) return false;
+        if (_bytes == null || !CanSave(flatten)) return false;
         var name = Path.GetFileNameWithoutExtension(_path ?? "document");
         var sfd = new SaveFileDialog
         {
@@ -469,7 +507,12 @@ public partial class MainWindow : Window
 
     private async Task PrintAsync()
     {
-        if (_bytes == null || _busy || !_canPrint) return;
+        if (_bytes == null || _busy) return;
+        if (!_canPrint)
+        {
+            SetStatus("This document's author doesn't allow printing.");
+            return;
+        }
         CommitTextEdits();
         int current = CurrentPage()?.Index ?? 0;
         var dlg = new PrintDialog
@@ -971,7 +1014,7 @@ public partial class MainWindow : Window
 
     private void SetTool(Tool tool)
     {
-        if (_readOnly) tool = Tool.Select;
+        if (!_canEditContent) tool = Tool.Select;
         _tool = tool;
         if (tool != Tool.PlaceImage) _pendingImage = null;
         bool placing = tool != Tool.Select;
@@ -1145,6 +1188,8 @@ public partial class MainWindow : Window
 
     private void OnSignatureFieldClicked(WidgetModel widget, Rect r)
     {
+        // A placed signature is page content, not a form value.
+        if (!_canEditContent) { SetStatus(FormsOnlyMessage); return; }
         var dlg = new SignatureDialog { Owner = this };
         if (dlg.ShowDialog() != true || dlg.SelectedPng == null) return;
         var img = ImageUtil.FromBytes(dlg.SelectedPng);
@@ -1169,9 +1214,10 @@ public partial class MainWindow : Window
         bool hasDoc = _bytes != null;
         EmptyState.Visibility = hasDoc ? Visibility.Collapsed : Visibility.Visible;
         bool editable = hasDoc && !_readOnly;
-        SaveButton.IsEnabled = SaveMenu.IsEnabled = SaveAsMenu.IsEnabled = SaveFlatMenu.IsEnabled = editable;
+        SaveButton.IsEnabled = SaveMenu.IsEnabled = SaveAsMenu.IsEnabled = editable;
+        SaveFlatMenu.IsEnabled = hasDoc && _canEditContent;
         PrintButton.IsEnabled = PrintMenu.IsEnabled = hasDoc && _canPrint;
-        ToolsBar.IsEnabled = editable;
+        ToolsBar.IsEnabled = hasDoc && _canEditContent;
         UndoButton.IsEnabled = _undo.Count > 0;
         RedoButton.IsEnabled = _redo.Count > 0;
         PageCountText.Text = $"/ {_pages.Count}";
@@ -1181,7 +1227,7 @@ public partial class MainWindow : Window
 
     private void UpdateTitle()
     {
-        Title = _bytes == null ? "PDF Editor" : $"{(_dirty ? "● " : "")}{Path.GetFileName(_path)}{(_readOnly ? " (read-only)" : "")} – PDF Editor";
+        Title = _bytes == null ? "PDF Editor" : $"{(_dirty ? "● " : "")}{Path.GetFileName(_path)}{(_readOnly ? " (read-only)" : !_canEditContent ? " (form filling only)" : "")} – PDF Editor";
     }
 
     private void SetStatus(string text) => StatusText.Text = text;
@@ -1230,14 +1276,16 @@ public partial class MainWindow : Window
 
     private void Signature_Click(object sender, RoutedEventArgs e)
     {
-        if (_bytes == null || _readOnly) return;
+        if (_bytes == null) return;
+        if (!_canEditContent) { SetStatus(_readOnly ? ReadOnlyMessage : FormsOnlyMessage); return; }
         var dlg = new SignatureDialog { Owner = this };
         if (dlg.ShowDialog() == true && dlg.SelectedPng != null) BeginPlaceImage(dlg.SelectedPng, signature: true);
     }
 
     private void Image_Click(object sender, RoutedEventArgs e)
     {
-        if (_bytes == null || _readOnly) return;
+        if (_bytes == null) return;
+        if (!_canEditContent) { SetStatus(_readOnly ? ReadOnlyMessage : FormsOnlyMessage); return; }
         var ofd = new OpenFileDialog { Title = "Choose an image", Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff|All files|*.*" };
         if (ofd.ShowDialog(this) != true) return;
         try
@@ -1500,9 +1548,9 @@ public partial class MainWindow : Window
             await OpenAsync(file);
             return;
         }
-        if (ImageExtensions.Contains(ext) && _bytes != null && _readOnly)
+        if (ImageExtensions.Contains(ext) && _bytes != null && !_canEditContent)
         {
-            SetStatus("This document is read-only: its author doesn't allow changes.");
+            SetStatus(_readOnly ? ReadOnlyMessage : FormsOnlyMessage);
             return;
         }
         if (ImageExtensions.Contains(ext) && _bytes != null)
