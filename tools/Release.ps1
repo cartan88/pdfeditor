@@ -40,9 +40,18 @@ $version = ([xml](Get-Content $project)).Project.PropertyGroup.Version | Where-O
 if (-not $version) { throw "No <Version> in $project" }
 $tag = "v$version"
 
+# Runs a native command and returns its exit code. Tools write progress and warnings to stderr, which Windows
+# PowerShell 5.1 would otherwise turn into a terminating error under $ErrorActionPreference = 'Stop'.
+function Invoke-Native([scriptblock] $command) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $command 2>&1 | ForEach-Object { "$_" } | Out-Host } finally { $ErrorActionPreference = $previous }
+    return $LASTEXITCODE
+}
+
 function Invoke-Checked([string] $what, [scriptblock] $command) {
-    & $command
-    if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)." }
+    $code = Invoke-Native $command
+    if ($code -ne 0) { throw "$what failed (exit code $code)." }
 }
 
 Write-Host "PDF Editor $version" -ForegroundColor Cyan
@@ -51,8 +60,7 @@ if (-not $NoUpload) {
     if (git -C $root status --porcelain) { throw 'There are uncommitted changes. Commit them first.' }
     git -C $root fetch -q origin
     if ((git -C $root rev-parse HEAD) -ne (git -C $root rev-parse '@{u}')) { throw 'main is not pushed. Push it first.' }
-    gh release view $tag --repo $Repo *> $null
-    if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Bump the version first." }
+    if ((Invoke-Native { gh release view $tag --repo $Repo --json tagName }) -eq 0) { throw "Release $tag already exists. Bump the version first." }
 }
 
 if (-not $SkipTests) {
@@ -79,8 +87,7 @@ Invoke-Checked 'Publishing the installer build' {
     dotnet publish $project -c Release -r win-x64 --self-contained true -p:DebugType=none -o $appDir --nologo -v q
 }
 # The previous release's package lets vpk build a small delta update; there is none before the first installer release.
-vpk download github --repoUrl "https://github.com/$Repo" --outputDir $releases
-if ($LASTEXITCODE -ne 0) { Write-Host 'No earlier installer release found; this release has full packages only.' -ForegroundColor Yellow }
+if ((Invoke-Native { vpk download github --repoUrl "https://github.com/$Repo" --outputDir $releases }) -ne 0) { Write-Host 'No earlier installer release found; this release has full packages only.' -ForegroundColor Yellow }
 Invoke-Checked 'Packing the installer' {
     vpk pack --packId $PackId --packVersion $version --runtime win-x64 --packDir $appDir --mainExe PdfEditor.exe --packTitle 'PDF Editor' `
         --icon (Join-Path $root 'src\PdfEditor\Assets\app.ico') --releaseNotes $NotesFile --shortcuts 'Desktop,StartMenuRoot' `
