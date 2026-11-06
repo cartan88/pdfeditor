@@ -63,6 +63,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private int _renderGeneration;
     private bool _renderLoopRunning;
+    /// <summary>Consecutive render passes that left a visible page undrawn (layout not ready, or the renderer failed).</summary>
+    private int _renderRetries;
+    private const int MaxRenderRetries = 8;
 
     // Editing state
     private Tool _tool = Tool.Select;
@@ -271,6 +274,10 @@ public partial class MainWindow : Window
             UpdateLayout();
             FitWidth();
             Scroller.ScrollToHome();
+            // Don't rely on the zoom or scroll position changing to trigger drawing: they may already be the same.
+            _renderRetries = 0;
+            ScheduleRender();
+            _ = Dispatcher.BeginInvoke((Action)ScheduleRender, DispatcherPriority.Loaded);
             int fillable = _fields.Count(f => f.Kind is not FieldKind.PushButton && !f.ReadOnly);
             SetStatus(fillable > 0
                 ? $"Opened {Path.GetFileName(path)} – {fillable} fillable field(s). Click a field to type, or use the tools above."
@@ -605,6 +612,7 @@ public partial class MainWindow : Window
         if (_renderer == null || _renderLoopRunning) { if (_renderLoopRunning) ScheduleRender(); return; }
         _renderLoopRunning = true;
         int generation = _renderGeneration;
+        bool incomplete = false; // a page in view could not be drawn this pass
         try
         {
             double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
@@ -615,8 +623,10 @@ public partial class MainWindow : Window
             foreach (var page in _pages)
             {
                 Rect bounds;
+                // Not laid out yet (just opened, or the window is still appearing): try again shortly.
+                if (page.RenderSize.Width < 1 || Scroller.ViewportHeight < 1) { incomplete = true; continue; }
                 try { bounds = page.TransformToAncestor(Scroller).TransformBounds(new Rect(page.RenderSize)); }
-                catch (InvalidOperationException) { continue; }
+                catch (InvalidOperationException) { incomplete = true; continue; }
                 double distance = bounds.Bottom < 0 ? -bounds.Bottom : bounds.Top > viewport ? bounds.Top - viewport : 0;
                 if (distance > viewport * 2)
                 {
@@ -651,13 +661,20 @@ public partial class MainWindow : Window
                 catch (Exception ex)
                 {
                     if (generation != _renderGeneration) return; // document was closed mid-render
-                    SetStatus($"Could not render page {page.Index + 1}: {ex.Message}");
+                    incomplete = true;
+                    if (_renderRetries >= MaxRenderRetries - 1) SetStatus($"Could not render page {page.Index + 1}: {ex.Message}");
                 }
             }
         }
         finally
         {
             _renderLoopRunning = false;
+            if (generation == _renderGeneration)
+            {
+                // Pages left blank would otherwise stay blank until the user zooms or scrolls.
+                if (!incomplete) _renderRetries = 0;
+                else if (++_renderRetries < MaxRenderRetries) ScheduleRender();
+            }
         }
     }
 
@@ -690,7 +707,7 @@ public partial class MainWindow : Window
     private void SetZoom(double zoom, Point? anchor = null)
     {
         zoom = Math.Clamp(zoom, 0.1, 6);
-        if (Math.Abs(zoom - _zoom) < 0.0001) { UpdateZoomBox(); return; }
+        if (Math.Abs(zoom - _zoom) < 0.0001) { UpdateZoomBox(); ScheduleRender(); return; }
         var a = anchor ?? new Point(Scroller.ViewportWidth / 2, Scroller.ViewportHeight / 2);
         double ratio = zoom / _zoom;
         double newX = (Scroller.HorizontalOffset + a.X) * ratio - a.X;
