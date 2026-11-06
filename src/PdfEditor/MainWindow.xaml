@@ -39,6 +39,9 @@
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_How to use" Click="Help_Click" />
+                <Separator />
+                <MenuItem Header="Check for _updates…" Click="CheckUpdates_Click" />
+                <MenuItem x:Name="AutoUpdateMenu" Header="Check for updates _automatically" IsCheckable="True" Click="AutoUpdate_Click" />
             </MenuItem>
         </Menu>
 
@@ -112,6 +115,9 @@
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
                 <StackPanel Orientation="Horizontal">
+                    <Button x:Name="UpdateButton" Visibility="Collapsed" Click="Update_Click" Margin="0,0,16,0" Padding="10,1"
+                            Background="{StaticResource AccentBrush}" Foreground="White" BorderThickness="0"
+                            ToolTip="A new version has been downloaded. Click to restart PDF Editor with it (you'll be asked to save first). Otherwise it is installed when you close the app." />
                     <TextBlock x:Name="FieldInfo" VerticalAlignment="Center" Margin="0,0,16,0" Foreground="#555" />
                     <Button Click="ZoomOut_Click" ToolTip="Zoom out (Ctrl+-)" Content="−" Width="24" Background="Transparent" BorderThickness="0" />
                     <ComboBox x:Name="ZoomBox" Width="86" IsEditable="True" KeyDown="ZoomBox_KeyDown" SelectionChanged="ZoomBox_SelectionChanged">

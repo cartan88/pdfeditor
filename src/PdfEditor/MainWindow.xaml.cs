@@ -312,6 +312,89 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Updates from GitHub; set by App for the real app, and left disabled in tests (no network).</summary>
+    internal AppUpdater Updater { get; set; } = AppUpdater.Disabled;
+
+    /// <summary>A few seconds after startup, downloads a newer version (if any) and offers to restart with it.</summary>
+    internal async Task CheckForUpdatesInBackgroundAsync()
+    {
+        AutoUpdateMenu.IsChecked = UserSettings.Load().CheckForUpdates;
+        if (!Updater.IsInstalled || AutoUpdateMenu.IsChecked != true) return;
+        await Task.Delay(TimeSpan.FromSeconds(5)); // don't compete with opening a document
+        try
+        {
+            if (await Updater.CheckAndDownloadAsync() is { } version) ShowUpdateReady(version);
+        }
+        catch (Exception)
+        {
+            // Offline or GitHub unavailable: try again next time the app starts.
+        }
+    }
+
+    private void ShowUpdateReady(string version)
+    {
+        UpdateButton.Content = $"⬆ Restart to update to {version}";
+        UpdateButton.Visibility = Visibility.Visible;
+    }
+
+    private void Update_Click(object sender, RoutedEventArgs e) => RestartToUpdate();
+
+    private void RestartToUpdate()
+    {
+        if (Updater.ReadyVersion == null || _busy) return;
+        CommitTextEdits();
+        if (!ConfirmDiscardChanges()) return;
+        // Reopen the current file in the new version (it is saved, or the changes were discarded).
+        var args = _path != null && File.Exists(_path) ? new[] { _path } : Array.Empty<string>();
+        Updater.RestartToUpdate(args);
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Updater.IsInstalled)
+        {
+            var open = MessageBox.Show(this,
+                $"This copy of PDF Editor ({AppUpdater.CurrentVersion}) wasn't installed with the installer, so it can't update itself.\n\n" +
+                "Install PDF Editor with PdfEditor-Setup.exe from the downloads page to get updates automatically. Open the downloads page now?",
+                "Check for updates", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (open == MessageBoxResult.Yes)
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppUpdater.ReleasesPage) { UseShellExecute = true });
+            return;
+        }
+        string? version;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            SetStatus("Checking for updates…");
+            version = await Updater.CheckAndDownloadAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowError("Couldn't check for updates. Check your internet connection and try again.", ex);
+            return;
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+        if (version == null)
+        {
+            SetStatus($"PDF Editor {AppUpdater.CurrentVersion} is the latest version.");
+            MessageBox.Show(this, $"You have the latest version ({AppUpdater.CurrentVersion}).", "Check for updates",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        ShowUpdateReady(version);
+        SetStatus($"Version {version} has been downloaded.");
+        if (MessageBox.Show(this, $"Version {version} has been downloaded. Restart PDF Editor now to use it?\n\n" +
+                "If you choose No, it is installed when you close the app.", "Update ready",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            RestartToUpdate();
+    }
+
+    private void AutoUpdate_Click(object sender, RoutedEventArgs e) =>
+        (UserSettings.Load() with { CheckForUpdates = AutoUpdateMenu.IsChecked }).Save();
+
     internal sealed record PasswordReply(string Password, bool ReadOnly);
 
     /// <summary>
@@ -1594,6 +1677,7 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         CommitTextEdits();
-        if (!ConfirmDiscardChanges()) e.Cancel = true;
+        if (!ConfirmDiscardChanges()) { e.Cancel = true; return; }
+        Updater.ApplyWhenClosed(); // a downloaded update is installed once the app has exited
     }
 }

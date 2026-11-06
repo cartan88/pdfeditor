@@ -9,6 +9,11 @@ Getting started
    (the app is not code-signed).
 3. Open a PDF (or drag one onto the window). Try sample-form.pdf to practise.
 
+Tip: this portable copy doesn't update itself. To get new versions automatically,
+install PDF Editor with PdfEditor-Setup.exe from
+https://github.com/cartan88/pdfeditor/releases/latest
+(no admin rights needed; your saved signatures and settings carry over).
+
 Filling in forms
 ----------------
 - Fillable fields are highlighted in blue: click and type. Tab moves to the next field.

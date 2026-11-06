@@ -10,11 +10,12 @@ public partial class App : Application
         base.OnStartup(e);
         DispatcherUnhandledException += OnUnhandledException;
 
-        var window = new MainWindow();
+        var window = new MainWindow { Updater = PdfEditor.Services.AppUpdater.ForThisProcess() };
         MainWindow = window;
         window.Show();
         if (e.Args.Length > 0)
             _ = window.OpenAsync(e.Args[0]);
+        _ = window.CheckForUpdatesInBackgroundAsync();
     }
 
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

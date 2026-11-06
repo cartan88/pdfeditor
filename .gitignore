@@ -8,3 +8,6 @@ publish-standalone/
 # IDE
 .vs/
 *.user
+
+# Release builds (tools/Release.ps1)
+artifacts/

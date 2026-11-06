@@ -11,6 +11,9 @@ public sealed record UserSettings
     public bool TextBold { get; init; }
     public bool TextItalic { get; init; }
 
+    /// <summary>Check GitHub for a newer version at startup (installed copies only).</summary>
+    public bool CheckForUpdates { get; init; } = true;
+
     /// <summary>The settings file (tests point this at a temporary folder).</summary>
     public static string FilePath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PdfEditor", "settings.json");

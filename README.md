@@ -2,8 +2,10 @@
 
 A Windows desktop app for filling in PDF forms and signing them.
 
-**Run it:** `publish\PdfEditor.exe` (needs the .NET 10 Desktop Runtime, which is already on this PC).
-You can also drag a PDF onto the exe or the window, or use it with *Open with…*.
+**Install it:** run `PdfEditor-Setup.exe` from the [latest release](https://github.com/cartan88/pdfeditor/releases/latest). It installs for the current Windows account only (no admin rights), adds Start menu and desktop shortcuts, and **updates itself**: new versions download in the background, and the status bar offers to restart into them (otherwise they install when the app closes). Help › Check for updates… checks on demand; Help › Check for updates automatically turns the startup check off. Copies run from the zip or a build folder never contact GitHub.
+
+The release also has `PdfEditor-Windows-x64.zip`, a portable copy that doesn't update itself. For development, `publish\PdfEditor.exe` needs the .NET 10 Desktop Runtime.
+You can drag a PDF onto the exe or the window, or use it with *Open with…*.
 
 ## Features
 - **Fillable forms (AcroForm):** text fields (including multi-line and comb fields), check boxes, radio buttons, and drop-downs. Fields are highlighted in blue; click one and type. Tab moves through fields in reading order (row by row, or column by column if the PDF asks for that).
@@ -28,11 +30,19 @@ cd src\PdfEditor
 dotnet build
 dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ..\..\publish
 ```
-For coworkers who don't have .NET installed, build the standalone version and zip the folder. This is how `PdfEditor-Windows-x64.zip` is made:
-```
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o ..\..\publish-standalone
-Compress-Archive -Path ..\..\publish-standalone\* -DestinationPath ..\..\PdfEditor-Windows-x64.zip -Force
-```
+
+## Releasing
+1. Bump `<Version>` in `src\PdfEditor\PdfEditor.csproj`, commit and push.
+2. Write the release notes in a Markdown file, then run:
+   ```
+   .\tools\Release.ps1 -NotesFile notes.md
+   ```
+   The script runs the tests, builds the installer (with [Velopack](https://velopack.io)) and the portable zip, and creates the GitHub release `v<version>` with `PdfEditor-Setup.exe`, `PdfEditor-Windows-x64.zip` and the update files installed copies download from. Add `-NoUpload` to only build into `artifacts\`.
+
+It needs the GitHub CLI (`gh`, logged in) and `vpk` at the same version as the Velopack package: `dotnet tool install -g vpk --version 1.2.161`.
+
+Installed copies live in `%LOCALAPPDATA%\PdfEditorApp`. The package ID must stay `PdfEditorApp`: changing it would stop existing installs from updating, and naming it `PdfEditor` would put the app in the folder that holds the user's signatures and settings, which uninstalling deletes.
+
 Publishing puts `READ ME.txt` (from `src\PdfEditor\Distribution`) and `samples\sample-form.pdf` next to the exe, so the zip contains everything. To change what coworkers read, edit `src\PdfEditor\Distribution\READ ME.txt`.
 
 ## Tests
