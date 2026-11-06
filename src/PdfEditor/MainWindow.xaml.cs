@@ -392,6 +392,17 @@ public partial class MainWindow : Window
             RestartToUpdate();
     }
 
+    private void About_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new AboutDialog(Updater.IsInstalled, UserSettings.Load().CheckForUpdates, Updater.ReadyVersion) { Owner = this };
+        dlg.ShowDialog();
+        switch (dlg.RequestedAction)
+        {
+            case AboutDialog.Action.CheckForUpdates: CheckUpdates_Click(this, e); break;
+            case AboutDialog.Action.RestartToUpdate: RestartToUpdate(); break;
+        }
+    }
+
     private void AutoUpdate_Click(object sender, RoutedEventArgs e) =>
         (UserSettings.Load() with { CheckForUpdates = AutoUpdateMenu.IsChecked }).Save();
 

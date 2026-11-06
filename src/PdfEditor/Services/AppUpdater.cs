@@ -10,8 +10,9 @@ namespace PdfEditor.Services;
 /// </summary>
 public sealed class AppUpdater
 {
-    public const string ReleasesPage = "https://github.com/cartan88/pdfeditor/releases";
-    private const string Repository = "https://github.com/cartan88/pdfeditor";
+    public const string RepositoryPage = "https://github.com/cartan88/pdfeditor";
+    public const string ReleasesPage = RepositoryPage + "/releases";
+    private const string Repository = RepositoryPage;
 
     private readonly UpdateManager? _manager;
     private UpdateInfo? _ready;
@@ -39,8 +40,8 @@ public sealed class AppUpdater
 
     /// <summary>The running version, e.g. "1.3.6".</summary>
     public static string CurrentVersion =>
-        Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
-        ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown";
+        typeof(AppUpdater).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(AppUpdater).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
     /// <summary>Version of a downloaded update waiting to be applied, or null.</summary>
     public string? ReadyVersion => _ready?.TargetFullRelease.Version.ToString();

@@ -42,6 +42,8 @@
                 <Separator />
                 <MenuItem Header="Check for _updates…" Click="CheckUpdates_Click" />
                 <MenuItem x:Name="AutoUpdateMenu" Header="Check for updates _automatically" IsCheckable="True" Click="AutoUpdate_Click" />
+                <Separator />
+                <MenuItem Header="_About PDF Editor" Click="About_Click" />
             </MenuItem>
         </Menu>
 
