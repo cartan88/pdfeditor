@@ -1428,6 +1428,37 @@ public partial class MainWindow : Window
         MessageBox.Show(this, message + "\n\n" + ex.Message, "PDF Editor", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
+    /// <summary>Distance scrolled by one press of Up or Down (about three lines of text at 100%).</summary>
+    private const double ArrowScrollStep = 48;
+
+    /// <summary>
+    /// Arrow keys, Page Up/Down and Home/End scroll the document wherever the focus is (a toolbar button just
+    /// clicked, a check box, full screen...), except in controls that use those keys themselves.
+    /// Left/Right scroll sideways when the page is wider than the window, otherwise go to the previous/next page.
+    /// </summary>
+    private bool ScrollWithKey(Key key, ModifierKeys mods)
+    {
+        if (_pages.Count == 0 || (mods & ~ModifierKeys.Control) != ModifierKeys.None) return false;
+        if (Keyboard.FocusedElement is ComboBox or ComboBoxItem or ListBox or ListBoxItem or MenuItem
+            or System.Windows.Controls.Primitives.RangeBase) return false; // drop-downs, lists, menus, sliders
+        bool ctrl = mods == ModifierKeys.Control;
+        bool sideways = Scroller.ScrollableWidth > 1;
+        switch (key)
+        {
+            case Key.Up when !ctrl: Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset - ArrowScrollStep); return true;
+            case Key.Down when !ctrl: Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset + ArrowScrollStep); return true;
+            case Key.Left when !ctrl && sideways: Scroller.ScrollToHorizontalOffset(Scroller.HorizontalOffset - ArrowScrollStep); return true;
+            case Key.Right when !ctrl && sideways: Scroller.ScrollToHorizontalOffset(Scroller.HorizontalOffset + ArrowScrollStep); return true;
+            case Key.Left when !ctrl: GoToPage((CurrentPage()?.Index ?? 0) - 1); return true;
+            case Key.Right when !ctrl: GoToPage((CurrentPage()?.Index ?? 0) + 1); return true;
+            case Key.PageUp when !ctrl: Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset - Scroller.ViewportHeight * 0.9); return true;
+            case Key.PageDown when !ctrl: Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset + Scroller.ViewportHeight * 0.9); return true;
+            case Key.Home: Scroller.ScrollToTop(); Scroller.ScrollToLeftEnd(); return true;
+            case Key.End: Scroller.ScrollToBottom(); return true;
+            default: return false;
+        }
+    }
+
     private static bool IsTyping() =>
         Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox
         || (Keyboard.FocusedElement is ComboBox cb && cb.IsEditable);
@@ -1505,6 +1536,7 @@ public partial class MainWindow : Window
             "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo form entries and placed items (inside a field, Ctrl+Z undoes typing there).\n" +
+            "  • Arrow keys, Page Up/Down and Home/End scroll the document (Left/Right change page when it fits the width).\n" +
             "  • Ctrl+mouse wheel zooms. F11 shows the document full screen (Esc or F11 to leave).\n" +
             "  • Items you place stay movable and editable when you reopen the saved file here.\n" +
             "  • File › Save Flattened Copy makes form entries and placed items permanent (no longer editable).\n" +
@@ -1699,7 +1731,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (IsTyping() || _selected == null) return;
+        if (IsTyping()) return;
+        if (_selected == null)
+        {
+            if (ScrollWithKey(key, mods)) e.Handled = true;
+            return;
+        }
 
         switch (key)
         {
