@@ -842,6 +842,7 @@ public partial class MainWindow : Window
         ZoomBox.SelectedIndex = -1;
         ZoomBox.Text = $"{Math.Round(_zoom * 100)}%";
         ZoomBox.SelectionChanged += ZoomBox_SelectionChanged;
+        FullScreenZoomText.Text = ZoomBox.Text;
     }
 
     private void ApplyZoomText(string text)
@@ -886,10 +887,88 @@ public partial class MainWindow : Window
 
     private void UpdateCurrentPage()
     {
-        if (PageBox.IsKeyboardFocusWithin) return;
         var p = CurrentPage();
+        FullScreenPageText.Text = p != null ? $"Page {p.Index + 1} of {_pages.Count}" : "";
+        if (PageBox.IsKeyboardFocusWithin) return;
         PageBox.Text = p != null ? (p.Index + 1).ToString() : "";
     }
+
+    // =====================================================================================
+    // Full screen
+    // =====================================================================================
+
+    private bool _fullScreen;
+    private (WindowStyle Style, ResizeMode Resize, WindowState State) _beforeFullScreen;
+    private DispatcherTimer? _fullScreenBarTimer;
+
+    internal bool IsFullScreen => _fullScreen;
+
+    private void ToggleFullScreen()
+    {
+        if (_fullScreen) ExitFullScreen();
+        else EnterFullScreen();
+    }
+
+    /// <summary>Hides the menu, toolbars and status bar and covers the whole screen, taskbar included.</summary>
+    private void EnterFullScreen()
+    {
+        if (_fullScreen) return;
+        _beforeFullScreen = (WindowStyle, ResizeMode, WindowState);
+        _fullScreen = true;
+        MainMenu.Visibility = ToolBars.Visibility = StatusBarPanel.Visibility = Visibility.Collapsed;
+        WindowStyle = WindowStyle.None;
+        ResizeMode = ResizeMode.NoResize;
+        // A borderless window covers the taskbar only if it is maximized after losing its border.
+        WindowState = WindowState.Normal;
+        WindowState = WindowState.Maximized;
+        FullScreenMenu.IsChecked = true;
+        UpdateZoomBox();
+        UpdateCurrentPage();
+        ShowFullScreenBar();
+    }
+
+    private void ExitFullScreen()
+    {
+        if (!_fullScreen) return;
+        _fullScreen = false;
+        _fullScreenBarTimer?.Stop();
+        FullScreenBar.Visibility = Visibility.Collapsed;
+        MainMenu.Visibility = ToolBars.Visibility = StatusBarPanel.Visibility = Visibility.Visible;
+        var (style, resize, state) = _beforeFullScreen;
+        WindowState = WindowState.Normal; // the normal size and position are remembered by WPF
+        WindowStyle = style;
+        ResizeMode = resize;
+        WindowState = state == WindowState.Minimized ? WindowState.Normal : state;
+        FullScreenMenu.IsChecked = false;
+    }
+
+    /// <summary>Shows the floating bar, then hides it after a few seconds without mouse movement (unless the mouse is on it).</summary>
+    private void ShowFullScreenBar()
+    {
+        if (!_fullScreen) return;
+        FullScreenBar.Visibility = Visibility.Visible;
+        _fullScreenBarTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(2.5), DispatcherPriority.Normal, (s, e) =>
+        {
+            if (FullScreenBar.IsMouseOver) return; // keep it while the user is reaching for it
+            _fullScreenBarTimer!.Stop();
+            FullScreenBar.Visibility = Visibility.Collapsed;
+        }, Dispatcher);
+        _fullScreenBarTimer.Stop();
+        _fullScreenBarTimer.Start();
+    }
+
+    private Point _lastMouse;
+
+    private void Window_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_fullScreen) return;
+        var p = e.GetPosition(this);
+        if ((p - _lastMouse).Length < 3) return; // ignore jitter and synthetic moves
+        _lastMouse = p;
+        ShowFullScreenBar();
+    }
+
+    private void FullScreen_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
 
     private void GoToPage(int index)
     {
@@ -1426,7 +1505,7 @@ public partial class MainWindow : Window
             "  • White-out hides existing content under a white box. It is NOT redaction: the covered text\n" +
             "    is still in the file and can be selected, searched and copied. Don't use it for confidential data.\n" +
             "  • Ctrl+Z / Ctrl+Y undo/redo form entries and placed items (inside a field, Ctrl+Z undoes typing there).\n" +
-            "  • Ctrl+mouse wheel zooms.\n" +
+            "  • Ctrl+mouse wheel zooms. F11 shows the document full screen (Esc or F11 to leave).\n" +
             "  • Items you place stay movable and editable when you reopen the saved file here.\n" +
             "  • File › Save Flattened Copy makes form entries and placed items permanent (no longer editable).\n" +
             "  • Ctrl+P prints the document with everything you filled in, exactly as a flattened copy would look.",
@@ -1605,10 +1684,18 @@ public partial class MainWindow : Window
             }
         }
 
+        if (key == Key.F11 && mods == ModifierKeys.None)
+        {
+            ToggleFullScreen();
+            e.Handled = true;
+            return;
+        }
+
         if (key == Key.Escape)
         {
             if (_tool != Tool.Select) { SetTool(Tool.Select); e.Handled = true; }
             else if (_selected != null && !_selected.IsEditing) { Select(null); e.Handled = true; }
+            else if (_fullScreen && !IsTyping()) { ExitFullScreen(); e.Handled = true; }
             return;
         }
 

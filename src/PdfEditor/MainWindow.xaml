@@ -6,9 +6,35 @@
         WindowStartupLocation="CenterScreen" AllowDrop="True"
         Background="{StaticResource ChromeBrush}"
         PreviewKeyDown="Window_PreviewKeyDown" Drop="Window_Drop" DragOver="Window_DragOver"
-        Closing="Window_Closing">
+        Closing="Window_Closing" PreviewMouseMove="Window_PreviewMouseMove">
+    <Window.Resources>
+        <!-- Flat light-on-dark buttons for the floating full screen bar. -->
+        <Style x:Key="OverlayButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#33FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#55FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <DockPanel>
-        <Menu DockPanel.Dock="Top" Background="{StaticResource ChromeBrush}" Padding="2">
+        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="{StaticResource ChromeBrush}" Padding="2">
             <MenuItem Header="_File">
                 <MenuItem Header="_Open…" InputGestureText="Ctrl+O" Click="Open_Click" />
                 <MenuItem x:Name="SaveMenu" Header="_Save" InputGestureText="Ctrl+S" Click="Save_Click" />
@@ -34,6 +60,7 @@
                 <MenuItem Header="Zoom _out" InputGestureText="Ctrl+-" Click="ZoomOut_Click" />
                 <MenuItem Header="Fit _width" InputGestureText="Ctrl+0" Click="FitWidth_Click" />
                 <MenuItem Header="_Actual size" InputGestureText="Ctrl+1" Click="ActualSize_Click" />
+                <MenuItem x:Name="FullScreenMenu" Header="_Full screen" InputGestureText="F11" IsCheckable="True" Click="FullScreen_Click" />
                 <Separator />
                 <MenuItem x:Name="HighlightMenu" Header="_Highlight form fields" IsCheckable="True" IsChecked="True" Click="Highlight_Click" />
             </MenuItem>
@@ -47,7 +74,7 @@
             </MenuItem>
         </Menu>
 
-        <ToolBarTray DockPanel.Dock="Top" Background="{StaticResource ChromeBrush}" IsLocked="True">
+        <ToolBarTray x:Name="ToolBars" DockPanel.Dock="Top" Background="{StaticResource ChromeBrush}" IsLocked="True">
             <ToolBar Background="{StaticResource ChromeBrush}">
                 <Button Style="{StaticResource ToolButton}" Click="Open_Click" ToolTip="Open a PDF (Ctrl+O)">📂 Open</Button>
                 <Button x:Name="SaveButton" Style="{StaticResource ToolButton}" Click="Save_Click" ToolTip="Save (Ctrl+S)">💾 Save</Button>
@@ -111,7 +138,7 @@
             </ToolBar>
         </ToolBarTray>
 
-        <StatusBar DockPanel.Dock="Bottom" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+        <StatusBar x:Name="StatusBarPanel" DockPanel.Dock="Bottom" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Ready" />
             </StatusBarItem>
@@ -155,6 +182,21 @@
                     <TextBlock Text="or drag and drop a PDF file anywhere in this window" HorizontalAlignment="Center" Foreground="#6B7280" />
                     <Button Content="Open PDF…" Click="Open_Click" HorizontalAlignment="Center" Margin="0,18,0,0"
                             Padding="22,8" FontSize="14" Background="{StaticResource AccentBrush}" Foreground="White" BorderThickness="0" />
+                </StackPanel>
+            </Border>
+
+            <!-- Shown only in full screen; fades out when the mouse is still. -->
+            <Border x:Name="FullScreenBar" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,14,32,0" Padding="6" CornerRadius="8" Background="#E6202328">
+                <StackPanel Orientation="Horizontal" TextElement.Foreground="White">
+                    <Button Style="{StaticResource OverlayButton}" Content="−" FontSize="15" Click="ZoomOut_Click" ToolTip="Zoom out (Ctrl+-)" />
+                    <TextBlock x:Name="FullScreenZoomText" VerticalAlignment="Center" MinWidth="44" TextAlignment="Center" />
+                    <Button Style="{StaticResource OverlayButton}" Content="+" FontSize="15" Click="ZoomIn_Click" ToolTip="Zoom in (Ctrl++)" />
+                    <Button Style="{StaticResource OverlayButton}" Content="Fit" Click="FitWidth_Click" ToolTip="Fit width (Ctrl+0)" />
+                    <Rectangle Width="1" Margin="6,4" Fill="#55FFFFFF" />
+                    <TextBlock x:Name="FullScreenPageText" VerticalAlignment="Center" Margin="6,0" />
+                    <Rectangle Width="1" Margin="6,4" Fill="#55FFFFFF" />
+                    <Button Style="{StaticResource OverlayButton}" Content="✕  Exit full screen" Click="FullScreen_Click" ToolTip="Exit full screen (Esc or F11)" />
                 </StackPanel>
             </Border>
         </Grid>
